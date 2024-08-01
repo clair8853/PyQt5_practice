@@ -1,0 +1,7 @@
+Include
+Scripts
+Lib
+*.cfg
+*.pyc
+*~
+.DS_Store
