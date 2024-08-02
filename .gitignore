@@ -7,3 +7,4 @@ Lib
 .DS_Store
 bin
 *.png
+*.hdf5
