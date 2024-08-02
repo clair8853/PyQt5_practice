@@ -5,3 +5,5 @@ Lib
 *.pyc
 *~
 .DS_Store
+bin
+*.png
