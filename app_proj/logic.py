@@ -2,10 +2,9 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
-import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import pandas as pd
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+
 
 def handle_load_data(app):
     if app.adata is not None:

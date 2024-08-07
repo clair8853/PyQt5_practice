@@ -1,11 +1,10 @@
-from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMessageBox, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QLabel, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from logic import handle_load_data, handle_plot_umap, handle_sync_lists, handle_deg_plot, handle_spatial_plot, handle_start_plotting, handle_save_file
 
 class MyApp(QMainWindow):
