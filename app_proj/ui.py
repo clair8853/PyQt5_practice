@@ -11,9 +11,10 @@ from style import cluster_all_styles, cluster1_styles, cluster2_styles, gene_gro
 
 class MyApp(QMainWindow):
 
-    def __init__(self):
+    def __init__(self, config):
         super().__init__()
         self.adata = None
+        self.config = config
         self.initUI()
 
     def initUI(self):
@@ -39,7 +40,7 @@ class MyApp(QMainWindow):
         self.create_gene_group_box()
 
         self.setWindowTitle('Analysis Tools')
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, self.config.get('window_width', 1200), self.config.get('window_height', 800))
         self.show()
 
     def create_cluster_all_group_box(self):
