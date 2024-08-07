@@ -6,6 +6,8 @@ Lib
 *~
 .DS_Store
 bin
-*.png
 *.hdf5
-*.jpg
+*.zip
+build
+dist
+main.spec
