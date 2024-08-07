@@ -1,11 +1,13 @@
-from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QAction, QFileDialog, QMessageBox, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QLabel, QListWidgetItem
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from logic import handle_load_data, handle_plot_umap, handle_sync_lists, handle_deg_plot, handle_spatial_plot, handle_start_plotting, handle_save_file
+from style import cluster_all_styles, cluster1_styles, cluster2_styles, gene_group_box_styles, analysis_group_box_styles
 
 class MyApp(QMainWindow):
 
@@ -43,37 +45,38 @@ class MyApp(QMainWindow):
     def create_cluster_all_group_box(self):
         self.cluster_all_group_box = QGroupBox()
         self.cluster_all_group_box.setFixedWidth(250)
+        self.cluster_all_group_box.setStyleSheet(cluster_all_styles)
         self.cluster_all_layout = QVBoxLayout()
 
         self.cluster1_group_box = QGroupBox("Clusters")
-        self.cluster1_group_box.setStyleSheet("QGroupBox { font-size: 15pt; }")
+        self.cluster1_group_box.setStyleSheet(cluster1_styles)
         self.cluster1_layout = QVBoxLayout()
         self.cluster1_list = QListWidget()
-        self.cluster1_list.setStyleSheet("QListWidget { font-size: 12pt; }")
+        self.cluster1_list.setStyleSheet(cluster1_styles)
         self.cluster1_layout.addWidget(self.cluster1_list)
         self.cluster1_group_box.setLayout(self.cluster1_layout)
 
         self.cluster2_group_box = QGroupBox("Other Clusters")
-        self.cluster2_group_box.setStyleSheet("QGroupBox { font-size: 15pt; }")
+        self.cluster2_group_box.setStyleSheet(cluster2_styles)
         self.cluster2_group_box.setCheckable(True)
         self.cluster2_group_box.setChecked(False)
         self.cluster2_layout = QVBoxLayout()
         self.cluster2_list = QListWidget()
-        self.cluster2_list.setStyleSheet("QListWidget { font-size: 12pt; }")
+        self.cluster2_list.setStyleSheet(cluster2_styles)
         self.cluster2_layout.addWidget(self.cluster2_list)
         self.cluster2_group_box.setLayout(self.cluster2_layout)
 
         self.all_spatial_button = QPushButton("All Spatial plot")
-        self.all_spatial_button.setStyleSheet("QPushButton { font-size: 15pt; }")
-        self.all_spatial_button.clicked.connect(self.all_spatial)
         self.spatial_plot_button = QPushButton("Spatial plot")
-        self.spatial_plot_button.setStyleSheet("QPushButton { font-size: 13pt; }")
-        self.spatial_plot_button.clicked.connect(self.spatial_plot)
         self.deg_analysis_button = QPushButton("DEG Analysis")
-        self.deg_analysis_button.setStyleSheet("QPushButton { font-size: 13pt; }")
-        self.deg_analysis_button.clicked.connect(self.deg_plot)
         self.save_deg_button = QPushButton("Save DEG Result")
-        self.save_deg_button.setStyleSheet("QPushButton { font-size: 13pt; }")
+        self.all_spatial_button.setStyleSheet(cluster_all_styles)
+        self.spatial_plot_button.setStyleSheet(cluster_all_styles)
+        self.deg_analysis_button.setStyleSheet(cluster_all_styles)
+        self.save_deg_button.setStyleSheet(cluster_all_styles)
+        self.all_spatial_button.clicked.connect(self.all_spatial)
+        self.spatial_plot_button.clicked.connect(self.spatial_plot)
+        self.deg_analysis_button.clicked.connect(self.deg_plot)
         self.save_deg_button.clicked.connect(self.save_file)
         self.save_deg_button.setEnabled(False)
 
@@ -92,25 +95,25 @@ class MyApp(QMainWindow):
 
     def create_gene_group_box(self):
         self.gene_group_box = QGroupBox("Gene")
-        self.gene_group_box.setStyleSheet("QGroupBox { font-size: 15pt; }")
+        self.gene_group_box.setStyleSheet(gene_group_box_styles)
         self.gene_group_box.setFixedWidth(200)
         self.gene_layout = QVBoxLayout()
         self.gene_list = QListWidget()
-        self.gene_list.setStyleSheet("QListWidget { font-size: 12pt; }")
+        self.gene_list.setStyleSheet(gene_group_box_styles)
         self.gene_layout.addWidget(self.gene_list)
         self.gene_group_box.setLayout(self.gene_layout)
 
         self.analysis_group_box = QGroupBox("Plotting")
-        self.analysis_group_box.setStyleSheet("QGroupBox { font-size: 15pt; }")
+        self.analysis_group_box.setStyleSheet(analysis_group_box_styles)
         self.analysis_layout = QVBoxLayout()
         self.dot_plot_radio = QRadioButton("Dot plot")
         self.violin_plot_radio = QRadioButton("Violin plot")
         self.feature_plot_radio = QRadioButton("Feature plot")
-        self.dot_plot_radio.setStyleSheet("QRadioButton { font-size: 12pt; }")
-        self.violin_plot_radio.setStyleSheet("QRadioButton { font-size: 12pt; }")
-        self.feature_plot_radio.setStyleSheet("QRadioButton { font-size: 12pt; }")
+        self.dot_plot_radio.setStyleSheet(analysis_group_box_styles)
+        self.violin_plot_radio.setStyleSheet(analysis_group_box_styles)
+        self.feature_plot_radio.setStyleSheet(analysis_group_box_styles)
         self.start_plotting_button = QPushButton("Start Plotting")
-        self.start_plotting_button.setStyleSheet("QPushButton { font-size: 13pt; }")
+        self.start_plotting_button.setStyleSheet(analysis_group_box_styles)
         self.start_plotting_button.clicked.connect(self.start_plotting)
         self.analysis_layout.addWidget(self.dot_plot_radio)
         self.analysis_layout.addWidget(self.violin_plot_radio)
