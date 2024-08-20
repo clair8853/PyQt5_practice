@@ -1,10 +1,12 @@
-from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem, QLineEdit, QMessageBox
 from PyQt5.QtGui import QIcon, QFontMetrics
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+from matplotlib.transforms import Affine2D
+import numpy as np
 from logic import handle_load_data, handle_plot_umap, handle_sync_lists, handle_deg_plot, handle_spatial_plot, handle_start_plotting, handle_save_file
 from style import cluster_all_styles, cluster1_styles, cluster2_styles, gene_group_box_styles, analysis_group_box_styles
 
@@ -46,6 +48,7 @@ class MyApp(QMainWindow):
         self.cluster_all_group_box = QGroupBox()
         self.cluster_all_group_box.setFixedWidth(250)
         self.cluster_all_group_box.setStyleSheet(cluster_all_styles)
+
         self.cluster_all_layout = QVBoxLayout()
 
         self.cluster1_group_box = QGroupBox("Clusters")
@@ -66,6 +69,15 @@ class MyApp(QMainWindow):
         self.cluster2_layout.addWidget(self.cluster2_list)
         self.cluster2_group_box.setLayout(self.cluster2_layout)
 
+        self.rotate_layout = QHBoxLayout()
+        self.rotate_inputline = QLineEdit(self)
+        self.rotate_inputbutton = QPushButton('Rotate')
+        self.rotate_inputbutton.clicked.connect(self.rotate_spatial_plot)
+        self.rotate_layout.addWidget(self.rotate_inputline)
+        self.rotate_layout.addWidget(self.rotate_inputbutton)
+        self.rotate_widget = QWidget()
+        self.rotate_widget.setLayout(self.rotate_layout)
+            
         self.all_spatial_button = QPushButton("All Spatial plot")
         self.spatial_plot_button = QPushButton("Spatial plot")
         self.deg_analysis_button = QPushButton("DEG Analysis")
@@ -83,6 +95,7 @@ class MyApp(QMainWindow):
         self.cluster_all_layout.addWidget(self.all_spatial_button)
         self.cluster_all_layout.addWidget(self.cluster1_group_box)
         self.cluster_all_layout.addWidget(self.spatial_plot_button)
+        self.cluster_all_layout.addWidget(self.rotate_widget)
         self.cluster_all_layout.addWidget(self.cluster2_group_box)
         self.cluster_all_layout.addWidget(self.deg_analysis_button)
         self.cluster_all_layout.addWidget(self.save_deg_button)
