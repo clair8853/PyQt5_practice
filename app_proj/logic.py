@@ -2,7 +2,8 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
-import matplotlib.colors as mcolors
+from matplotlib.transforms import Affine2D
+import numpy as np
 import pandas as pd
 
 
@@ -47,12 +48,33 @@ def handle_plot_umap(app):
     if app.adata is not None:
         app.plot_canvas.figure.clear()
         ax = app.plot_canvas.figure.add_subplot(111)
-        sq.pl.spatial_scatter(app.adata, shape=None, color=['cell_type_2'], legend_loc=None, ax=ax, frameon=False, title=None, size=5)
+        # Extract x and y coordinates from adata
         x_coords = app.adata.obsm['spatial'][:, 0]
         y_coords = app.adata.obsm['spatial'][:, 1]
-        ax.set_xlim(x_coords.min(), x_coords.max())
-        ax.set_ylim(y_coords.min(), y_coords.max())
+
+        # Calculate the center of the plot
+        center_x = (x_coords.max() + x_coords.min()) / 2
+        center_y = (y_coords.max() + y_coords.min()) / 2
+
+        # Apply rotation transformation around the center
+        rotation = Affine2D().rotate_around(center_x, center_y, 0)
+        ax.transData = rotation + ax.transData
+
+        # Plot using squidpy
+        sq.pl.spatial_scatter(app.adata, shape=None, color="cell_type_2", ax=ax, legend_loc=None,frameon=False, title=None)
+
+        # Set the title
         ax.set_title('')
+
+        # Calculate new limits after rotation
+        coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+        x_min, y_min = coords.min(axis=0)
+        x_max, y_max = coords.max(axis=0)
+
+        # Set new limits
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+
         app.plot_canvas.draw()
 
 def handle_start_plotting(app):
@@ -75,6 +97,19 @@ def handle_start_plotting(app):
 
         if plot_type is not None:
             app.plot(selected_genes, plot_type)
+
+def handle_plotting_clusters(app):
+    selected_clusters1 = [item.text() for item in app.cluster1_list.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+                
+    app.plot_canvas.figure.clear()
+    plot_type = None
+    if app.radio_all.isChecked():
+        plot_type = 'all'
+    elif app.radio_select.isChecked():
+        plot_type = 'select'
+        
+    if plot_type is not None:
+        app.plot_clusters(selected_clusters1, plot_type)  
 
 def handle_spatial_plot(app):
     selected_clusters1 = [item.text() for item in app.cluster1_list.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]

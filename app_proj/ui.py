@@ -1,11 +1,13 @@
-from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QAction, QVBoxLayout, QWidget, QHBoxLayout, QListWidget, QPushButton, QGroupBox, QRadioButton, QGridLayout, QListWidgetItem, QLabel, QLineEdit, QMessageBox
 from PyQt5.QtGui import QIcon, QFontMetrics
 from PyQt5.QtCore import Qt
 import scanpy as sc
 import squidpy as sq
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
-from logic import handle_load_data, handle_plot_umap, handle_sync_lists, handle_deg_plot, handle_spatial_plot, handle_start_plotting, handle_save_file
+from matplotlib.transforms import Affine2D
+import numpy as np
+from logic import handle_load_data, handle_plot_umap, handle_sync_lists, handle_deg_plot, handle_spatial_plot, handle_start_plotting, handle_save_file, handle_plotting_clusters
 from style import cluster_all_styles, cluster1_styles, cluster2_styles, gene_group_box_styles, analysis_group_box_styles
 
 class MyApp(QMainWindow):
@@ -56,6 +58,34 @@ class MyApp(QMainWindow):
         self.cluster1_layout.addWidget(self.cluster1_list)
         self.cluster1_group_box.setLayout(self.cluster1_layout)
 
+        # Adding the Spatial Plot group box under Clusters
+        self.spatial_plot_group_box = QGroupBox('Spatial Plot')
+        self.spatial_plot_layout = QVBoxLayout()
+        self.spatial_plot_group_box.setLayout(self.spatial_plot_layout)
+
+        # First row: All/Select radio buttons
+        radio_layout = QHBoxLayout()
+        self.radio_all = QRadioButton('All')
+        self.radio_select = QRadioButton('Select')
+        radio_layout.addWidget(self.radio_all)
+        radio_layout.addWidget(self.radio_select)
+        self.radio_all.setChecked(True)  # Set 'All' as default selected option
+        self.spatial_plot_layout.addLayout(radio_layout)
+
+        # Second row: Axis label and input box
+        axis_layout = QHBoxLayout()
+        axis_label = QLabel('Axis :')
+        self.axis_input = QLineEdit()
+        self.axis_input.setText('0')  # Default value is 0
+        axis_layout.addWidget(axis_label)
+        axis_layout.addWidget(self.axis_input)
+        self.spatial_plot_layout.addLayout(axis_layout)
+
+        # Third row: Start button (aligned to the right)
+        start_button = QPushButton('Start')
+        self.spatial_plot_layout.addWidget(start_button)
+        start_button.clicked.connect(self.plotting_clusters)        
+
         self.cluster2_group_box = QGroupBox("Other Clusters")
         self.cluster2_group_box.setStyleSheet(cluster2_styles)
         self.cluster2_group_box.setCheckable(True)
@@ -66,23 +96,24 @@ class MyApp(QMainWindow):
         self.cluster2_layout.addWidget(self.cluster2_list)
         self.cluster2_group_box.setLayout(self.cluster2_layout)
 
-        self.all_spatial_button = QPushButton("All Spatial plot")
-        self.spatial_plot_button = QPushButton("Spatial plot")
+        #self.all_spatial_button = QPushButton("All Spatial plot")
+        #self.spatial_plot_button = QPushButton("Spatial plot")
         self.deg_analysis_button = QPushButton("DEG Analysis")
         self.save_deg_button = QPushButton("Save DEG Result")
-        self.all_spatial_button.setStyleSheet(cluster_all_styles)
-        self.spatial_plot_button.setStyleSheet(cluster_all_styles)
+        #self.all_spatial_button.setStyleSheet(cluster_all_styles)
+        #self.spatial_plot_button.setStyleSheet(cluster_all_styles)
         self.deg_analysis_button.setStyleSheet(cluster_all_styles)
         self.save_deg_button.setStyleSheet(cluster_all_styles)
-        self.all_spatial_button.clicked.connect(self.all_spatial)
-        self.spatial_plot_button.clicked.connect(self.spatial_plot)
+        #self.all_spatial_button.clicked.connect(self.all_spatial)
+        #self.spatial_plot_button.clicked.connect(self.spatial_plot)
         self.deg_analysis_button.clicked.connect(self.deg_plot)
         self.save_deg_button.clicked.connect(self.save_file)
         self.save_deg_button.setEnabled(False)
 
-        self.cluster_all_layout.addWidget(self.all_spatial_button)
+        #self.cluster_all_layout.addWidget(self.all_spatial_button)
         self.cluster_all_layout.addWidget(self.cluster1_group_box)
-        self.cluster_all_layout.addWidget(self.spatial_plot_button)
+        #self.cluster_all_layout.addWidget(self.spatial_plot_button)
+        self.cluster_all_layout.addWidget(self.spatial_plot_group_box)
         self.cluster_all_layout.addWidget(self.cluster2_group_box)
         self.cluster_all_layout.addWidget(self.deg_analysis_button)
         self.cluster_all_layout.addWidget(self.save_deg_button)
@@ -180,14 +211,17 @@ class MyApp(QMainWindow):
     def sync_lists(self, item):
         handle_sync_lists(self, item)
 
-    def all_spatial(self):
-        handle_plot_umap(self)
+    #def all_spatial(self):
+    #    handle_plot_umap(self)
 
     def plot_umap(self):
         handle_plot_umap(self)
 
     def start_plotting(self):
         handle_start_plotting(self)
+
+    def plotting_clusters(self):
+        handle_plotting_clusters(self)
 
     def plot(self, genes, plot_type):
         if plot_type == 'dotplot':
@@ -200,8 +234,80 @@ class MyApp(QMainWindow):
             sq.pl.spatial_scatter(self.adata, shape=None, color=genes, frameon=False, title=None, cmap='Purples', size=1, ncols=4)
         plt.show()
 
-    def spatial_plot(self):
-        handle_spatial_plot(self)
+    def plot_clusters(self, clusters, plot_type):
+        num = float(self.axis_input.text())
+        if num == 0:
+            axis = 360
+        else:
+            axis = 180/num        
+
+        if plot_type == 'all':
+            ax = self.plot_canvas.figure.add_subplot(111)
+            # Extract x and y coordinates from adata
+            x_coords = self.adata.obsm['spatial'][:, 0]
+            y_coords = self.adata.obsm['spatial'][:, 1]
+
+            # Calculate the center of the plot
+            center_x = (x_coords.max() + x_coords.min()) / 2
+            center_y = (y_coords.max() + y_coords.min()) / 2
+
+            # Apply rotation transformation around the center
+            rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
+            ax.transData = rotation + ax.transData
+
+            # Plot using squidpy
+            sq.pl.spatial_scatter(self.adata, shape=None, color="cell_type_2", ax=ax, legend_loc=None,frameon=False, title=None)
+
+            # Set the title
+            ax.set_title('')
+
+            # Calculate new limits after rotation
+            coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+            x_min, y_min = coords.min(axis=0)
+            x_max, y_max = coords.max(axis=0)
+
+            # Set new limits
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+            
+        elif plot_type == 'select':
+            if not clusters:
+                QMessageBox.warning(self, "Warning", "Please select at least one cluster in Cluster 1.")
+                return
+            else:
+                ax = self.plot_canvas.figure.add_subplot(111)
+                # Extract x and y coordinates from adata
+                x_coords = self.adata.obsm['spatial'][:, 0]
+                y_coords = self.adata.obsm['spatial'][:, 1]
+
+                # Calculate the center of the plot
+                center_x = (x_coords.max() + x_coords.min()) / 2
+                center_y = (y_coords.max() + y_coords.min()) / 2
+
+                # Apply rotation transformation around the center
+                rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
+                ax.transData = rotation + ax.transData
+
+                # Plot using squidpy
+                sq.pl.spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=clusters, ax=ax, frameon=False, title=None, legend_fontsize=15)
+
+                # Set the title
+                ax.set_title('')
+
+                # Calculate new limits after rotation
+                coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+                x_min, y_min = coords.min(axis=0)
+                x_max, y_max = coords.max(axis=0)
+
+                # Set new limits
+                ax.set_xlim(x_min, x_max)
+                ax.set_ylim(y_min, y_max)
+        
+        self.plot_canvas.draw()
+        
+
+    #def spatial_plot(self):
+    #    handle_spatial_plot(self)
 
     def deg_plot(self):
         handle_deg_plot(self)
