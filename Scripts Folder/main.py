@@ -40,8 +40,7 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
 
-
-        # Create the main horizontal splitter
+        # Create the main horizontal splitter for left, central, and right areas
         main_splitter = QSplitter(Qt.Horizontal)
         self.central_widget.setLayout(QVBoxLayout())
         self.central_widget.layout().addWidget(main_splitter)
@@ -51,7 +50,7 @@ class MainWindow(QMainWindow):
         self.setup_central_area(main_splitter)
         self.setup_right_area(main_splitter)
 
-        # Set the split ratios (1:3:1)
+        # Set the split ratios (1:3:1) for left, central, and right panels
         main_splitter.setSizes([200, 850, 150])
 
         # Main window settings
@@ -77,7 +76,7 @@ class MainWindow(QMainWindow):
         spatial_plot_layout = QVBoxLayout(spatial_plot_group_box)
         left_layout.addWidget(spatial_plot_group_box)
 
-        # First row: All/Select radio buttons
+        # First row: All/Select radio buttons for selecting spatial plot options
         radio_layout = QHBoxLayout()
         self.radio_all = QRadioButton('All')
         self.radio_select = QRadioButton('Select')
@@ -86,7 +85,7 @@ class MainWindow(QMainWindow):
         self.radio_all.setChecked(True)  # Set 'All' as default selected option
         spatial_plot_layout.addLayout(radio_layout)
 
-        # Second row: Axis label and input box
+        # Second row: Axis label and input box for setting rotation axis
         axis_layout = QHBoxLayout()
         axis_label = QLabel('Axis :')
         self.axis_input = QLineEdit()
@@ -95,19 +94,19 @@ class MainWindow(QMainWindow):
         axis_layout.addWidget(self.axis_input)
         spatial_plot_layout.addLayout(axis_layout)
 
-        # Third row: Start button (aligned to the right)
+        # Third row: Start button for executing spatial plot with selected options
         start_button = QPushButton('Start')
         start_button.clicked.connect(self.plot_spatial_scatter)
         spatial_plot_layout.addWidget(start_button)
 
-        # Create Other Clusters group box
+        # Create Other Clusters group box for additional cluster selections
         other_clusters_group_box = QGroupBox('Other Clusters')
         other_clusters_group_box.setCheckable(True)
         other_clusters_group_box.setChecked(False)
         other_clusters_layout = QVBoxLayout(other_clusters_group_box)
         left_layout.addWidget(other_clusters_group_box)
 
-        # Create the list widget for displaying Clusters
+        # Create the list widget for displaying additional Clusters
         self.other_clusters_list_widget = QListWidget()
         other_clusters_layout.addWidget(self.other_clusters_list_widget)
 
@@ -134,7 +133,7 @@ class MainWindow(QMainWindow):
         right_panel = QGroupBox()
         right_layout = QVBoxLayout(right_panel)
 
-        # Create Genes group box
+        # Create Genes group box for displaying gene selection options
         genes_group_box = QGroupBox('Genes')
         genes_layout = QVBoxLayout(genes_group_box)
         right_layout.addWidget(genes_group_box)
@@ -143,7 +142,7 @@ class MainWindow(QMainWindow):
         self.genes_list_widget = QListWidget()
         genes_layout.addWidget(self.genes_list_widget)
 
-        # Create Plotting radio button inside a group box
+        # Create Plotting radio button inside a group box for different plotting options
         genes_plotting_group_box = QGroupBox('Plotting')
         genes_plotting_layout = QVBoxLayout(genes_plotting_group_box)
         self.dot_plot_radio_button = QRadioButton('Dot plot')
@@ -164,7 +163,7 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(right_panel)
 
     def setup_central_area(self, parent_splitter):
-        # Create the central area
+        # Create the central area for displaying plots
         central_panel = QWidget()
         self.central_layout = QVBoxLayout(central_panel)
         self.plot_canvas = FigureCanvas(plt.Figure())
@@ -172,6 +171,7 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(central_panel)
 
     def open_file(self):
+        # Prompt the user to open an .h5ad or .hdf5 file
         # Check if there's already loaded data
         if self.adata is not None:
             reply = QMessageBox.question(self, 'Warning', 
@@ -216,14 +216,14 @@ class MainWindow(QMainWindow):
             print(f"Error loading file: {str(e)}")
 
     def update_lists(self):
-        # Update List
+        # Update cluster and gene lists based on loaded data
         if self.adata is not None:
             self.update_list(self.clusters_list_widget)
             self.update_list(self.other_clusters_list_widget)
             self.update_list(self.genes_list_widget, is_gene=True)
 
     def update_list(self, list_widget, is_gene=False):
-        # Clear the list widget before adding new items
+        # Populate the list widget with sorted cluster or gene names
         list_widget.clear()
 
         # Extract and sort cluster or gene list
@@ -237,6 +237,7 @@ class MainWindow(QMainWindow):
             list_widget.addItem(list_item)
 
     def sync_lists(self, item):
+        # Sync the selection state between Clusters and Other Clusters lists
         self.clusters_list_widget.blockSignals(True)
         self.other_clusters_list_widget.blockSignals(True)
 
@@ -254,6 +255,7 @@ class MainWindow(QMainWindow):
         self.other_clusters_list_widget.blockSignals(False)
 
     def show_spatial_scatter_plot(self, groups=None, legend=None):
+        # Generate a spatial scatter plot with optional group filtering and rotation
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -289,7 +291,7 @@ class MainWindow(QMainWindow):
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
 
-            # Set new limits
+            # Set new limits to match rotated coordinates
             ax.set_xlim(x_min, x_max)
             ax.set_ylim(y_min, y_max)
 
@@ -342,10 +344,10 @@ class MainWindow(QMainWindow):
                     rotation = Affine2D().rotate_around(center_x, center_y, -np.pi / axis)
                     ax.transData = rotation + ax.transData
 
-                    # Plot using squidpy
+                    # Plot using squidpy for each selected gene
                     sq.pl.spatial_scatter(self.adata, shape=None, color=gene, ax=ax, frameon=False, title=None, cmap='Purples', size=1)
 
-                    # Set the title
+                    # Set the title to the gene name
                     ax.set_title(f"{gene}")
 
                     # Calculate new limits after rotation
@@ -353,12 +355,13 @@ class MainWindow(QMainWindow):
                     x_min, y_min = coords.min(axis=0)
                     x_max, y_max = coords.max(axis=0)
 
-                    # Set new limits
+                    # Set new limits to match rotated coordinates
                     ax.set_xlim(x_min-1000, x_max+1000)
                     ax.set_ylim(y_min-1000, y_max+1000)
 
                 plt.show()
             else:
+                # Plot other types of plots (Dot plot, Violin plot, Feature plot)
                 if self.dot_plot_radio_button.isChecked():
                     sc.pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
@@ -369,7 +372,8 @@ class MainWindow(QMainWindow):
                 plt.show()
 
     def deg_plot(self):
-        # 
+        # Perform Differentially Expressed Genes (DEG) analysis between selected clusters
+        # Enable the save button after analysis
         self.deg_save_button.setEnabled(True)
 
         self.selected_clusters = [item.text() for item in self.clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
@@ -380,6 +384,7 @@ class MainWindow(QMainWindow):
             return
         
         else:
+            # Merge selected clusters for DEG analysis
             merged_cluster_A = '_'.join(self.selected_clusters)
             merged_cluster_B = '_'.join(self.selected_other_clusters)
                         
@@ -389,10 +394,12 @@ class MainWindow(QMainWindow):
             self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(self.selected_other_clusters)] = merged_cluster_B                        
             self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
             
+            # Run DEG analysis using Scanpy's rank_genes_groups function
             sc.tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
             sc.pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
 
     def save_deg_result(self):
+        # Save the DEG analysis results to a CSV file
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)", options=options)
@@ -412,9 +419,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "Error", f"No results to save. Please run the analysis first.")
 
-
-
 if __name__ == '__main__':
+    # Start the PyQt application
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
