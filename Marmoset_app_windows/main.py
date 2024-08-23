@@ -40,7 +40,6 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
 
-
         # Create the main horizontal splitter
         main_splitter = QSplitter(Qt.Horizontal)
         self.central_widget.setLayout(QVBoxLayout())
@@ -411,7 +410,6 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(info)                     
         else:
             QMessageBox.critical(self, "Error", f"No results to save. Please run the analysis first.")
-
 
 
 if __name__ == '__main__':
