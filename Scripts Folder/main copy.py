@@ -1,15 +1,17 @@
 import sys
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QAction, QFileDialog, 
-    QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
-    QRadioButton, QLabel, QLineEdit, QPushButton,
-    QListWidget, QListWidgetItem, QSplitter
-)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
+                             QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
+                             QRadioButton, QLabel, QLineEdit, QPushButton,
+                             QListWidget, QListWidgetItem, QSplitter)
 from PyQt5.QtCore import Qt
-from matplotlib.figure import Figure
-from matplotlib.pyplot import show as pltshow
-from scanpy import plotting as pt
-from squidpy.pl import spatial_scatter
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.transforms import Affine2D
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import squidpy as sq
+import os
 
 class MainWindow(QMainWindow):
     
@@ -161,11 +163,10 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(right_panel)
 
     def setup_central_area(self, parent_splitter):
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
         # Create the central area
         central_panel = QWidget()
         self.central_layout = QVBoxLayout(central_panel)
-        self.plot_canvas = FigureCanvas(Figure())
+        self.plot_canvas = FigureCanvas(plt.Figure())
         self.central_layout.addWidget(self.plot_canvas)
         parent_splitter.addWidget(central_panel)
 
@@ -189,11 +190,9 @@ class MainWindow(QMainWindow):
             self.load_data(file_name)
 
     def load_data(self, file_name):
-        import os
-        from scanpy import read_h5ad
         try:
             # Load the data using scanpy's read_h5ad function
-            self.adata = read_h5ad(file_name)
+            self.adata = sc.read_h5ad(file_name)
             
             # Extract the file name from the full path
             base_name = os.path.basename(file_name)
@@ -254,8 +253,6 @@ class MainWindow(QMainWindow):
         self.other_clusters_list_widget.blockSignals(False)
 
     def show_spatial_scatter_plot(self, groups=None, legend=None):
-        from matplotlib.transforms import Affine2D
-        from numpy import pi, vstack
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -277,17 +274,17 @@ class MainWindow(QMainWindow):
             center_y = (y_coords.max() + y_coords.min()) / 2
 
             # Apply rotation transformation around the center
-            rotation = Affine2D().rotate_around(center_x, center_y, -pi/(axis))
+            rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
             ax.transData = rotation + ax.transData
 
             # Plot using squidpy
-            spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=groups, ax=ax, legend_loc=legend, frameon=False, title=None)
+            sq.pl.spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=groups, ax=ax, legend_loc=legend,frameon=False, title=None)
 
             # Set the title
             ax.set_title('')
 
             # Calculate new limits after rotation
-            coords = rotation.transform(vstack([x_coords, y_coords]).T)
+            coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
 
@@ -310,7 +307,6 @@ class MainWindow(QMainWindow):
                 self.show_spatial_scatter_plot(groups=self.selected_clusters, legend='right margin')
     
     def plot_genes(self):
-        from matplotlib.transforms import Affine2D
         if self.adata is not None:
             selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
             
@@ -323,12 +319,10 @@ class MainWindow(QMainWindow):
             if num > 0:
                 axis = 180 / num
 
-            if self.scatter_plot_radio_button.isChecked():
-                from matplotlib.pyplot import subplots
-                from numpy import pi, vstack                                    
+            if self.scatter_plot_radio_button.isChecked():                                    
                 # Determine the number of subplots needed
                 num_genes = len(selected_genes)
-                fig, axes = subplots(1, num_genes, figsize=(5 * num_genes, 5))
+                fig, axes = plt.subplots(1, num_genes, figsize=(5 * num_genes, 5))
 
                 # If only one gene is selected, wrap the axes in a list for consistency
                 if num_genes == 1:
@@ -344,17 +338,17 @@ class MainWindow(QMainWindow):
                     center_y = (y_coords.max() + y_coords.min()) / 2
 
                     # Apply rotation transformation around the center
-                    rotation = Affine2D().rotate_around(center_x, center_y, -pi / axis)
+                    rotation = Affine2D().rotate_around(center_x, center_y, -np.pi / axis)
                     ax.transData = rotation + ax.transData
 
                     # Plot using squidpy
-                    spatial_scatter(self.adata, shape=None, color=gene, ax=ax, frameon=False, title=None, cmap='Purples', size=1)
+                    sq.pl.spatial_scatter(self.adata, shape=None, color=gene, ax=ax, frameon=False, title=None, cmap='Purples', size=1)
 
                     # Set the title
                     ax.set_title(f"{gene}")
 
                     # Calculate new limits after rotation
-                    coords = rotation.transform(vstack([x_coords, y_coords]).T)
+                    coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
                     x_min, y_min = coords.min(axis=0)
                     x_max, y_max = coords.max(axis=0)
 
@@ -362,23 +356,21 @@ class MainWindow(QMainWindow):
                     ax.set_xlim(x_min-1000, x_max+1000)
                     ax.set_ylim(y_min-1000, y_max+1000)
 
-                pltshow()
+                plt.show()
             else:
                 if self.dot_plot_radio_button.isChecked():
-                    pt.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
+                    sc.pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
-                    pt.stacked_violin(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
+                    sc.pl.stacked_violin(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.feature_plot_radio_button.isChecked():
                     selected_genes.append('cell_type_2')
-                    pt.umap(self.adata, color=selected_genes, ncols=4)
-                pltshow()
+                    sc.pl.umap(self.adata, color=selected_genes, ncols=4)
+                plt.show()
 
     def deg_plot(self):
-        from scanpy import tools as tl
-        # Enable the Save button after DEG analysis
+        # 
         self.deg_save_button.setEnabled(True)
 
-        # Get selected clusters from both lists
         self.selected_clusters = [item.text() for item in self.clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
         self.selected_other_clusters = [item.text() for item in self.other_clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
 
@@ -396,18 +388,17 @@ class MainWindow(QMainWindow):
             self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(self.selected_other_clusters)] = merged_cluster_B                        
             self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
             
-            tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
-            pt.rank_genes_groups(self.adata, n_genes=25, sharey=False)
+            sc.tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
+            sc.pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
 
     def save_deg_result(self):
-        from pandas import DataFrame
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)", options=options)
         if 'rank_genes_groups' in self.adata.uns:            
             result = self.adata.uns['rank_genes_groups']
             groups = result['names'].dtype.names            
-            result_df = DataFrame(
+            result_df = pd.DataFrame(
                 {group + '_' + key: result[key][group]
                 for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
             )
