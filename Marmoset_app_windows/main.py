@@ -7,8 +7,8 @@ from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.transforms import Affine2D
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
+from numpy import pi, vstack
+from pandas import DataFrame
 import scanpy as sc
 import squidpy as sq
 import os
@@ -274,7 +274,7 @@ class MainWindow(QMainWindow):
             center_y = (y_coords.max() + y_coords.min()) / 2
 
             # Apply rotation transformation around the center
-            rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
+            rotation = Affine2D().rotate_around(center_x, center_y, (pi/axis))
             ax.transData = rotation + ax.transData
 
             # Plot using squidpy
@@ -284,7 +284,7 @@ class MainWindow(QMainWindow):
             ax.set_title('')
 
             # Calculate new limits after rotation
-            coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+            coords = rotation.transform(vstack([x_coords, y_coords]).T)
             x_min, y_min = coords.min(axis=0)
             x_max, y_max = coords.max(axis=0)
 
@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
                     center_y = (y_coords.max() + y_coords.min()) / 2
 
                     # Apply rotation transformation around the center
-                    rotation = Affine2D().rotate_around(center_x, center_y, -np.pi / axis)
+                    rotation = Affine2D().rotate_around(center_x, center_y, (pi / axis))
                     ax.transData = rotation + ax.transData
 
                     # Plot using squidpy
@@ -348,7 +348,7 @@ class MainWindow(QMainWindow):
                     ax.set_title(f"{gene}")
 
                     # Calculate new limits after rotation
-                    coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+                    coords = rotation.transform(vstack([x_coords, y_coords]).T)
                     x_min, y_min = coords.min(axis=0)
                     x_max, y_max = coords.max(axis=0)
 
@@ -356,7 +356,6 @@ class MainWindow(QMainWindow):
                     ax.set_xlim(x_min-1000, x_max+1000)
                     ax.set_ylim(y_min-1000, y_max+1000)
 
-                plt.show()
             else:
                 if self.dot_plot_radio_button.isChecked():
                     sc.pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
@@ -365,10 +364,10 @@ class MainWindow(QMainWindow):
                 elif self.feature_plot_radio_button.isChecked():
                     selected_genes.append('cell_type_2')
                     sc.pl.umap(self.adata, color=selected_genes, ncols=4)
-                plt.show()
+
+            plt.show()
 
     def deg_plot(self):
-        # 
         self.deg_save_button.setEnabled(True)
 
         self.selected_clusters = [item.text() for item in self.clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
@@ -398,7 +397,7 @@ class MainWindow(QMainWindow):
         if 'rank_genes_groups' in self.adata.uns:            
             result = self.adata.uns['rank_genes_groups']
             groups = result['names'].dtype.names            
-            result_df = pd.DataFrame(
+            result_df = DataFrame(
                 {group + '_' + key: result[key][group]
                 for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
             )

@@ -1,4 +1,5 @@
 import sys
+from os import path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QAction, QFileDialog, 
     QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
@@ -6,6 +7,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QSplitter
 )
 from PyQt5.QtCore import Qt
+from scanpy import read_h5ad
 
 class MainWindow(QMainWindow):
     
@@ -206,15 +208,17 @@ class MainWindow(QMainWindow):
         if file_name:
             self.load_data(file_name)
 
-    def load_data(self, file_name):
-        import os
-        from scanpy import read_h5ad
+    def load_data(self, file_name):        
         try:
+            # Use the directory of the current script as the base directory
+            base_dir = path.dirname(path.abspath(__file__))
+            file_path = path.join(base_dir, file_name)
+            
             # Load the data using scanpy's read_h5ad function
-            self.adata = read_h5ad(file_name)
+            self.adata = read_h5ad(file_path)
             
             # Extract the file name from the full path
-            base_name = os.path.basename(file_name)
+            base_name = path.basename(file_name)
             
             # Update the status bar with the loaded file name
             self.statusbar.showMessage(f"Loaded '{base_name}'")
