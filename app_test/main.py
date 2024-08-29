@@ -6,10 +6,6 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QSplitter
 )
 from PyQt5.QtCore import Qt
-from matplotlib.figure import Figure
-from matplotlib.pyplot import show as pltshow
-from scanpy import plotting as pt
-from squidpy.pl import spatial_scatter
 
 class MainWindow(QMainWindow):
     
@@ -162,6 +158,7 @@ class MainWindow(QMainWindow):
 
     def setup_central_area(self, parent_splitter):
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
         # Create the central area
         central_panel = QWidget()
         self.central_layout = QVBoxLayout(central_panel)
@@ -256,6 +253,8 @@ class MainWindow(QMainWindow):
     def show_spatial_scatter_plot(self, groups=None, legend=None):
         from matplotlib.transforms import Affine2D
         from numpy import pi, vstack
+        from squidpy.pl import spatial_scatter
+
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -311,6 +310,7 @@ class MainWindow(QMainWindow):
     
     def plot_genes(self):
         from matplotlib.transforms import Affine2D
+        from matplotlib.pyplot import show as pltshow
         if self.adata is not None:
             selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
             
@@ -325,7 +325,9 @@ class MainWindow(QMainWindow):
 
             if self.scatter_plot_radio_button.isChecked():
                 from matplotlib.pyplot import subplots
-                from numpy import pi, vstack                                    
+                from numpy import pi, vstack
+                from squidpy.pl import spatial_scatter
+                                                    
                 # Determine the number of subplots needed
                 num_genes = len(selected_genes)
                 fig, axes = subplots(1, num_genes, figsize=(5 * num_genes, 5))
@@ -364,6 +366,8 @@ class MainWindow(QMainWindow):
 
                 pltshow()
             else:
+                from scanpy import plotting as pt
+                
                 if self.dot_plot_radio_button.isChecked():
                     pt.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
@@ -387,6 +391,8 @@ class MainWindow(QMainWindow):
             return
         
         else:
+            from scanpy import plotting as pt
+
             merged_cluster_A = '_'.join(self.selected_clusters)
             merged_cluster_B = '_'.join(self.selected_other_clusters)
                         
@@ -422,6 +428,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
+    from multiprocessing import freeze_support 
+
+    freeze_support()
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
