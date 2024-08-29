@@ -6,10 +6,6 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QSplitter
 )
 from PyQt5.QtCore import Qt
-from matplotlib.figure import Figure
-from matplotlib.pyplot import show as pltshow
-from scanpy import plotting as pt
-from squidpy.pl import spatial_scatter
 
 class MainWindow(QMainWindow):
     
@@ -69,6 +65,11 @@ class MainWindow(QMainWindow):
         self.clusters_list_widget = QListWidget()
         clusters_layout.addWidget(self.clusters_list_widget)
 
+        # Adding the Clear button for Clusters
+        clear_clusters_button = QPushButton("Clear")
+        clear_clusters_button.clicked.connect(lambda: self.clear_selection(self.clusters_list_widget))
+        clusters_layout.addWidget(clear_clusters_button)
+
         # Adding the Spatial Plot group box under Clusters
         spatial_plot_group_box = QGroupBox('Spatial Plot')
         spatial_plot_layout = QVBoxLayout(spatial_plot_group_box)
@@ -108,6 +109,11 @@ class MainWindow(QMainWindow):
         self.other_clusters_list_widget = QListWidget()
         other_clusters_layout.addWidget(self.other_clusters_list_widget)
 
+        # Adding the Clear button for Other Clusters
+        clear_other_clusters_button = QPushButton("Clear")
+        clear_other_clusters_button.clicked.connect(lambda: self.clear_selection(self.other_clusters_list_widget))
+        other_clusters_layout.addWidget(clear_other_clusters_button)
+
         # Adding the DEG Plot Button
         deg_plot_button = QPushButton("DEG Analysis")
         deg_plot_button.clicked.connect(self.deg_plot)
@@ -140,6 +146,11 @@ class MainWindow(QMainWindow):
         self.genes_list_widget = QListWidget()
         genes_layout.addWidget(self.genes_list_widget)
 
+        # Adding the Clear button for Genes
+        clear_genes_button = QPushButton("Clear")
+        clear_genes_button.clicked.connect(lambda: self.clear_selection(self.genes_list_widget))
+        genes_layout.addWidget(clear_genes_button)
+
         # Create Plotting radio button inside a group box
         genes_plotting_group_box = QGroupBox('Plotting')
         genes_plotting_layout = QVBoxLayout(genes_plotting_group_box)
@@ -162,12 +173,19 @@ class MainWindow(QMainWindow):
 
     def setup_central_area(self, parent_splitter):
         from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
         # Create the central area
         central_panel = QWidget()
         self.central_layout = QVBoxLayout(central_panel)
         self.plot_canvas = FigureCanvas(Figure())
         self.central_layout.addWidget(self.plot_canvas)
         parent_splitter.addWidget(central_panel)
+
+    def clear_selection(self, list_widget):
+        """Clear the selection in the provided list widget."""
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            item.setCheckState(Qt.Unchecked)
 
     def open_file(self):
         # Check if there's already loaded data
@@ -253,13 +271,38 @@ class MainWindow(QMainWindow):
         self.clusters_list_widget.blockSignals(False)
         self.other_clusters_list_widget.blockSignals(False)
 
-    def show_spatial_scatter_plot(self, groups=None, legend=None):
+    def apply_rotation(self, ax, axis):
         from matplotlib.transforms import Affine2D
         from numpy import pi, vstack
+
+        # Extract x and y coordinates from adata
+        x_coords = self.adata.obsm['spatial'][:, 0]
+        y_coords = self.adata.obsm['spatial'][:, 1]
+
+        # Calculate the center of the plot
+        center_x = (x_coords.max() + x_coords.min()) / 2
+        center_y = (y_coords.max() + y_coords.min()) / 2
+
+        # Apply rotation transformation around the center
+        rotation = Affine2D().rotate_around(center_x, center_y, pi / axis)
+        ax.transData = rotation + ax.transData
+
+        # Calculate new limits after rotation
+        coords = rotation.transform(vstack([x_coords, y_coords]).T)
+        x_min, y_min = coords.min(axis=0)
+        x_max, y_max = coords.max(axis=0)
+
+        # Set new limits
+        ax.set_xlim(x_min - 1000, x_max + 1000)
+        ax.set_ylim(y_min - 1000, y_max + 1000)
+
+    def show_spatial_scatter_plot(self, groups=None, legend=None):
+        from squidpy.pl import spatial_scatter
+
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
-            axis = 180/num
+            axis = 180 / num
 
         if self.adata is not None:
             # Clear any existing plot
@@ -268,32 +311,14 @@ class MainWindow(QMainWindow):
             # Create a new plot and add it to the central layout
             ax = self.plot_canvas.figure.add_subplot(111)
 
-            # Extract x and y coordinates from adata
-            x_coords = self.adata.obsm['spatial'][:, 0]
-            y_coords = self.adata.obsm['spatial'][:, 1]
-
-            # Calculate the center of the plot
-            center_x = (x_coords.max() + x_coords.min()) / 2
-            center_y = (y_coords.max() + y_coords.min()) / 2
-
-            # Apply rotation transformation around the center
-            rotation = Affine2D().rotate_around(center_x, center_y, -pi/(axis))
-            ax.transData = rotation + ax.transData
+            # Apply the rotation using the new function
+            self.apply_rotation(ax, axis)
 
             # Plot using squidpy
             spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=groups, ax=ax, legend_loc=legend, frameon=False, title=None)
 
             # Set the title
             ax.set_title('')
-
-            # Calculate new limits after rotation
-            coords = rotation.transform(vstack([x_coords, y_coords]).T)
-            x_min, y_min = coords.min(axis=0)
-            x_max, y_max = coords.max(axis=0)
-
-            # Set new limits
-            ax.set_xlim(x_min, x_max)
-            ax.set_ylim(y_min, y_max)
 
             self.plot_canvas.draw()
 
@@ -310,10 +335,12 @@ class MainWindow(QMainWindow):
                 self.show_spatial_scatter_plot(groups=self.selected_clusters, legend='right margin')
     
     def plot_genes(self):
-        from matplotlib.transforms import Affine2D
+        from matplotlib.pyplot import subplots, show as pltshow
+        from squidpy.pl import spatial_scatter
+
         if self.adata is not None:
             selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
-            
+
             if not selected_genes:
                 QMessageBox.warning(self, "Warning", "Please select at least one gene.")
                 return
@@ -324,8 +351,6 @@ class MainWindow(QMainWindow):
                 axis = 180 / num
 
             if self.scatter_plot_radio_button.isChecked():
-                from matplotlib.pyplot import subplots
-                from numpy import pi, vstack                                    
                 # Determine the number of subplots needed
                 num_genes = len(selected_genes)
                 fig, axes = subplots(1, num_genes, figsize=(5 * num_genes, 5))
@@ -335,17 +360,8 @@ class MainWindow(QMainWindow):
                     axes = [axes]
 
                 for gene, ax in zip(selected_genes, axes):
-                    # Extract x and y coordinates from adata
-                    x_coords = self.adata.obsm['spatial'][:, 0]
-                    y_coords = self.adata.obsm['spatial'][:, 1]
-
-                    # Calculate the center of the plot
-                    center_x = (x_coords.max() + x_coords.min()) / 2
-                    center_y = (y_coords.max() + y_coords.min()) / 2
-
-                    # Apply rotation transformation around the center
-                    rotation = Affine2D().rotate_around(center_x, center_y, -pi / axis)
-                    ax.transData = rotation + ax.transData
+                    # Apply the rotation using the new function
+                    self.apply_rotation(ax, axis)
 
                     # Plot using squidpy
                     spatial_scatter(self.adata, shape=None, color=gene, ax=ax, frameon=False, title=None, cmap='Purples', size=1)
@@ -353,17 +369,8 @@ class MainWindow(QMainWindow):
                     # Set the title
                     ax.set_title(f"{gene}")
 
-                    # Calculate new limits after rotation
-                    coords = rotation.transform(vstack([x_coords, y_coords]).T)
-                    x_min, y_min = coords.min(axis=0)
-                    x_max, y_max = coords.max(axis=0)
-
-                    # Set new limits
-                    ax.set_xlim(x_min-1000, x_max+1000)
-                    ax.set_ylim(y_min-1000, y_max+1000)
-
-                pltshow()
             else:
+                from scanpy import plotting as pt
                 if self.dot_plot_radio_button.isChecked():
                     pt.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
@@ -371,7 +378,7 @@ class MainWindow(QMainWindow):
                 elif self.feature_plot_radio_button.isChecked():
                     selected_genes.append('cell_type_2')
                     pt.umap(self.adata, color=selected_genes, ncols=4)
-                pltshow()
+            pltshow()
 
     def deg_plot(self):
         from scanpy import tools as tl
@@ -387,6 +394,8 @@ class MainWindow(QMainWindow):
             return
         
         else:
+            from scanpy import plotting as pt
+
             merged_cluster_A = '_'.join(self.selected_clusters)
             merged_cluster_B = '_'.join(self.selected_other_clusters)
                         
@@ -422,6 +431,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
+    from multiprocessing import freeze_support 
+
+    freeze_support()
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
