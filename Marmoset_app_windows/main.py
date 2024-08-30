@@ -412,6 +412,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
+    from multiprocessing import freeze_support 
+
+    freeze_support()
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()

@@ -1,20 +1,88 @@
 import sys
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
-                             QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
-                             QRadioButton, QLabel, QLineEdit, QPushButton,
-                             QListWidget, QListWidgetItem, QSplitter)
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton, QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem, QSplitter
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.transforms import Affine2D
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import scanpy as sc
-import squidpy as sq
 import os
 
+# 데이터 로딩을 위한 Worker 클래스
+class DataLoadingWorker(QThread):
+    data_loaded = pyqtSignal(object)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, file_name):
+        super().__init__()
+        self.file_name = file_name
+
+    def run(self):
+        import scanpy as sc
+        try:
+            adata = sc.read_h5ad(self.file_name)
+            self.data_loaded.emit(adata)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+# 시각화를 위한 Worker 클래스
+class VisualizationWorker(QThread):
+    visualization_done = pyqtSignal()
+
+    def __init__(self, adata, canvas, groups=None, legend=None, axis_rotation=360):
+        super().__init__()
+        self.adata = adata
+        self.canvas = canvas
+        self.groups = groups
+        self.legend = legend
+        self.axis_rotation = axis_rotation
+
+    def run(self):
+        import squidpy as sq
+        from matplotlib.transforms import Affine2D
+        import numpy as np
+        
+        # 시각화 작업
+        axis = 360
+        if self.axis_rotation > 0:
+            axis = 180 / self.axis_rotation
+
+        if self.adata is not None:
+            # Clear any existing plot
+            self.canvas.figure.clear()
+
+            # Create a new plot and add it to the central layout
+            ax = self.canvas.figure.add_subplot(111)
+
+            # Extract x and y coordinates from adata
+            x_coords = self.adata.obsm['spatial'][:, 0]
+            y_coords = self.adata.obsm['spatial'][:, 1]
+
+            # Calculate the center of the plot
+            center_x = (x_coords.max() + x_coords.min()) / 2
+            center_y = (y_coords.max() + y_coords.min()) / 2
+
+            # Apply rotation transformation around the center
+            rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
+            ax.transData = rotation + ax.transData
+
+            # Plot using squidpy
+            sq.pl.spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=self.groups, ax=ax, legend_loc=self.legend, frameon=False, title=None)
+
+            # Set the title
+            ax.set_title('')
+
+            # Calculate new limits after rotation
+            coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
+            x_min, y_min = coords.min(axis=0)
+            x_max, y_max = coords.max(axis=0)
+
+            # Set new limits
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
+
+            self.canvas.draw()
+            self.visualization_done.emit()
+
 class MainWindow(QMainWindow):
-    
+
     def __init__(self):
         super().__init__()
         self.adata = None  # Scanpy AnnData object to hold the loaded data
@@ -57,11 +125,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('PyQt5 Application')
         self.setGeometry(100, 100, 1200, 800)
 
-    def setup_left_area(self, parent_splitter):       
+    def setup_left_area(self, parent_splitter):
         # Create the left area
         left_panel = QGroupBox()
         left_layout = QVBoxLayout(left_panel)
-        
+
         # Create Clusters group box
         clusters_group_box = QGroupBox('Clusters')
         clusters_layout = QVBoxLayout(clusters_group_box)
@@ -171,48 +239,62 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(central_panel)
 
     def open_file(self):
-        # Check if there's already loaded data
         if self.adata is not None:
-            reply = QMessageBox.question(self, 'Warning', 
-                "Loading a new file will overwrite the existing data. Do you want to continue?", 
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = QMessageBox.question(self, 'Warning', "Loading a new file will overwrite the existing data. Do you want to continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
             if reply == QMessageBox.No:
                 return  # Exit the function if the user chooses not to continue
 
-        # Open file dialog to select an .h5ad or .hdf5 file
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
-        file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", 
-            "HDF5 Files (*.h5ad *.hdf5);;All Files (*)", options=options)
-        
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5);;All Files (*)", options=options)
+
         if file_name:
-            self.load_data(file_name)
+            self.start_data_loading(file_name)
 
-    def load_data(self, file_name):
-        try:
-            # Load the data using scanpy's read_h5ad function
-            self.adata = sc.read_h5ad(file_name)
-            
-            # Extract the file name from the full path
-            base_name = os.path.basename(file_name)
-            
-            # Update the status bar with the loaded file name
-            self.statusbar.showMessage(f"Loaded '{base_name}'")
+    def start_data_loading(self, file_name):
+        self.statusbar.showMessage('Loading data...')
+        
+        # Worker 스레드를 시작하여 데이터 로딩 수행
+        self.worker = DataLoadingWorker(file_name)
+        self.worker.data_loaded.connect(self.on_data_loaded)
+        self.worker.error_occurred.connect(self.on_data_load_error)
+        self.worker.start()
 
-            # Populate the gene list in the Genes group box
-            self.update_lists()
+    def on_data_loaded(self, adata):
+        self.adata = adata
+        
+        # UI 업데이트 (데이터 로딩 후 처리)
+        self.update_lists()
+        self.show_spatial_scatter_plot()
 
-            # Show the default spatial scatter plot in the central area
-            self.show_spatial_scatter_plot()
+        base_name = os.path.basename(self.worker.file_name)
+        self.statusbar.showMessage(f"Loaded '{base_name}'")
+        print(f'Data loaded from: {base_name}')
 
-            # Log the loaded file for debugging
-            print(f'Data loaded from: {file_name}')
+        # 스레드 종료 후 스레드 객체 삭제
+        self.worker.deleteLater()
 
-        except Exception as e:
-            # Show error message if something goes wrong during loading
-            QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
-            print(f"Error loading file: {str(e)}")
+    def on_data_load_error(self, error_message):
+        QMessageBox.critical(self, "Error", f"Failed to load file: {error_message}")
+        self.statusbar.showMessage('Ready')
+        print(f"Error loading file: {error_message}")
+
+        # 스레드 종료 후 스레드 객체 삭제
+        self.worker.deleteLater()
+
+    def start_visualization(self, groups=None, legend=None):
+        axis_rotation = float(self.axis_input.text())
+        self.statusbar.showMessage('Visualizing data...')
+        
+        # Worker 스레드를 시작하여 시각화 작업 수행
+        self.vis_worker = VisualizationWorker(self.adata, self.plot_canvas, groups, legend, axis_rotation)
+        self.vis_worker.visualization_done.connect(self.on_visualization_done)
+        self.vis_worker.start()
+
+    def on_visualization_done(self):
+        self.statusbar.showMessage('Visualization complete')
+        self.vis_worker.deleteLater()
 
     def update_lists(self):
         # Update List
@@ -253,49 +335,10 @@ class MainWindow(QMainWindow):
         self.other_clusters_list_widget.blockSignals(False)
 
     def show_spatial_scatter_plot(self, groups=None, legend=None):
-        axis = 360
-        num = float(self.axis_input.text())
-        if num > 0:
-            axis = 180/num
-
-        if self.adata is not None:
-            # Clear any existing plot
-            self.plot_canvas.figure.clear()
-
-            # Create a new plot and add it to the central layout
-            ax = self.plot_canvas.figure.add_subplot(111)
-
-            # Extract x and y coordinates from adata
-            x_coords = self.adata.obsm['spatial'][:, 0]
-            y_coords = self.adata.obsm['spatial'][:, 1]
-
-            # Calculate the center of the plot
-            center_x = (x_coords.max() + x_coords.min()) / 2
-            center_y = (y_coords.max() + y_coords.min()) / 2
-
-            # Apply rotation transformation around the center
-            rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
-            ax.transData = rotation + ax.transData
-
-            # Plot using squidpy
-            sq.pl.spatial_scatter(self.adata, shape=None, color="cell_type_2", groups=groups, ax=ax, legend_loc=legend,frameon=False, title=None)
-
-            # Set the title
-            ax.set_title('')
-
-            # Calculate new limits after rotation
-            coords = rotation.transform(np.vstack([x_coords, y_coords]).T)
-            x_min, y_min = coords.min(axis=0)
-            x_max, y_max = coords.max(axis=0)
-
-            # Set new limits
-            ax.set_xlim(x_min, x_max)
-            ax.set_ylim(y_min, y_max)
-
-            self.plot_canvas.draw()
+        # 시각화 작업을 백그라운드 스레드에서 수행하도록 수정
+        self.start_visualization(groups, legend)
 
     def plot_spatial_scatter(self):
-        # Determine whether to plot all clusters or only selected ones
         if self.radio_all.isChecked():
             self.show_spatial_scatter_plot(groups=None, legend=None)
         elif self.radio_select.isChecked():
@@ -305,7 +348,7 @@ class MainWindow(QMainWindow):
                 return
             else:
                 self.show_spatial_scatter_plot(groups=self.selected_clusters, legend='right margin')
-    
+
     def plot_genes(self):
         if self.adata is not None:
             selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
@@ -319,7 +362,11 @@ class MainWindow(QMainWindow):
             if num > 0:
                 axis = 180 / num
 
-            if self.scatter_plot_radio_button.isChecked():                                    
+            if self.scatter_plot_radio_button.isChecked():
+                import squidpy as sq
+                from matplotlib.transforms import Affine2D
+                import numpy as np
+                                    
                 # Determine the number of subplots needed
                 num_genes = len(selected_genes)
                 fig, axes = plt.subplots(1, num_genes, figsize=(5 * num_genes, 5))
@@ -357,6 +404,7 @@ class MainWindow(QMainWindow):
                     ax.set_ylim(y_min-1000, y_max+1000)
 
             else:
+                import scanpy as sc
                 if self.dot_plot_radio_button.isChecked():
                     sc.pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
@@ -378,6 +426,7 @@ class MainWindow(QMainWindow):
             return
         
         else:
+            import scanpy as sc
             merged_cluster_A = '_'.join(self.selected_clusters)
             merged_cluster_B = '_'.join(self.selected_other_clusters)
                         
@@ -394,7 +443,8 @@ class MainWindow(QMainWindow):
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)", options=options)
-        if 'rank_genes_groups' in self.adata.uns:            
+        if 'rank_genes_groups' in self.adata.uns:
+            import pandas as pd            
             result = self.adata.uns['rank_genes_groups']
             groups = result['names'].dtype.names            
             result_df = pd.DataFrame(
@@ -412,10 +462,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
-    from multiprocessing import freeze_support 
+    from multiprocessing import freeze_support
 
     freeze_support()
-    
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()

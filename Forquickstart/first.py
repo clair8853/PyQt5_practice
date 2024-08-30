@@ -1,20 +1,12 @@
 import sys
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
-                             QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
-                             QRadioButton, QLabel, QLineEdit, QPushButton,
-                             QListWidget, QListWidgetItem, QSplitter)
+from PyQt5.QtWidgets import QApplication, QMainWindow, QAction, QFileDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton, QLabel, QLineEdit, QPushButton, QListWidget, QListWidgetItem, QSplitter
 from PyQt5.QtCore import Qt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.transforms import Affine2D
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import scanpy as sc
-import squidpy as sq
 import os
 
 class MainWindow(QMainWindow):
-    
+
     def __init__(self):
         super().__init__()
         self.adata = None  # Scanpy AnnData object to hold the loaded data
@@ -57,11 +49,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('PyQt5 Application')
         self.setGeometry(100, 100, 1200, 800)
 
-    def setup_left_area(self, parent_splitter):       
+    def setup_left_area(self, parent_splitter):
         # Create the left area
         left_panel = QGroupBox()
         left_layout = QVBoxLayout(left_panel)
-        
+
         # Create Clusters group box
         clusters_group_box = QGroupBox('Clusters')
         clusters_layout = QVBoxLayout(clusters_group_box)
@@ -171,25 +163,22 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(central_panel)
 
     def open_file(self):
-        # Check if there's already loaded data
         if self.adata is not None:
-            reply = QMessageBox.question(self, 'Warning', 
-                "Loading a new file will overwrite the existing data. Do you want to continue?", 
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            reply = QMessageBox.question(self, 'Warning', "Loading a new file will overwrite the existing data. Do you want to continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
             if reply == QMessageBox.No:
                 return  # Exit the function if the user chooses not to continue
 
-        # Open file dialog to select an .h5ad or .hdf5 file
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
-        file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", 
-            "HDF5 Files (*.h5ad *.hdf5);;All Files (*)", options=options)
-        
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5);;All Files (*)", options=options)
+
         if file_name:
+                                    
             self.load_data(file_name)
 
     def load_data(self, file_name):
+        import scanpy as sc
         try:
             # Load the data using scanpy's read_h5ad function
             self.adata = sc.read_h5ad(file_name)
@@ -253,6 +242,7 @@ class MainWindow(QMainWindow):
         self.other_clusters_list_widget.blockSignals(False)
 
     def show_spatial_scatter_plot(self, groups=None, legend=None):
+        import squidpy as sq
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -274,6 +264,8 @@ class MainWindow(QMainWindow):
             center_y = (y_coords.max() + y_coords.min()) / 2
 
             # Apply rotation transformation around the center
+            from matplotlib.transforms import Affine2D
+            import numpy as np
             rotation = Affine2D().rotate_around(center_x, center_y, -np.pi/(axis))
             ax.transData = rotation + ax.transData
 
@@ -305,7 +297,7 @@ class MainWindow(QMainWindow):
                 return
             else:
                 self.show_spatial_scatter_plot(groups=self.selected_clusters, legend='right margin')
-    
+
     def plot_genes(self):
         if self.adata is not None:
             selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
@@ -319,7 +311,11 @@ class MainWindow(QMainWindow):
             if num > 0:
                 axis = 180 / num
 
-            if self.scatter_plot_radio_button.isChecked():                                    
+            if self.scatter_plot_radio_button.isChecked():
+                import squidpy as sq
+                from matplotlib.transforms import Affine2D
+                import numpy as np
+                                    
                 # Determine the number of subplots needed
                 num_genes = len(selected_genes)
                 fig, axes = plt.subplots(1, num_genes, figsize=(5 * num_genes, 5))
@@ -357,6 +353,7 @@ class MainWindow(QMainWindow):
                     ax.set_ylim(y_min-1000, y_max+1000)
 
             else:
+                import scanpy as sc
                 if self.dot_plot_radio_button.isChecked():
                     sc.pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
                 elif self.violin_plot_radio_button.isChecked():
@@ -378,6 +375,7 @@ class MainWindow(QMainWindow):
             return
         
         else:
+            import scanpy as sc
             merged_cluster_A = '_'.join(self.selected_clusters)
             merged_cluster_B = '_'.join(self.selected_other_clusters)
                         
@@ -394,7 +392,8 @@ class MainWindow(QMainWindow):
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)", options=options)
-        if 'rank_genes_groups' in self.adata.uns:            
+        if 'rank_genes_groups' in self.adata.uns:
+            import pandas as pd            
             result = self.adata.uns['rank_genes_groups']
             groups = result['names'].dtype.names            
             result_df = pd.DataFrame(
@@ -412,10 +411,10 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
-    from multiprocessing import freeze_support 
+    from multiprocessing import freeze_support
 
     freeze_support()
-    
+
     app = QApplication(sys.argv)
     main_window = MainWindow()
     main_window.show()
