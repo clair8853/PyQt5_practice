@@ -11,6 +11,5 @@ bin
 build
 dist
 main.spec
-*.ipynb
 share
 myenv
