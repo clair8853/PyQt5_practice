@@ -1,6 +1,0 @@
-PyQt5==5.15.7
-matplotlib==3.7.1
-numpy==1.25.0
-pandas==2.0.1
-scanpy==1.9.3
-squidpy==1.2.1
