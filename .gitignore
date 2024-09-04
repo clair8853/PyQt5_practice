@@ -13,3 +13,4 @@ dist
 main.spec
 share
 myenv
+*.spec

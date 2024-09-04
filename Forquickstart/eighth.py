@@ -169,8 +169,8 @@ class MainWindow(QMainWindow):
             list_widget.addItem(list_item)
 
     def plot_spatial_scatter(self):
-        import plotly.express as px
-        
+        import plotly.graph_objects as go
+               
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -178,6 +178,11 @@ class MainWindow(QMainWindow):
         
         if self.adata is not None:
             try:
+                color_categories = self.adata.obs['cell_type_2'].astype('category').cat.categories
+                color_map = {category: color for category, color in zip(color_categories, self.adata.uns['cell_type_2_colors'])}
+
+                cell_type_categories_sorted = sorted(self.adata.obs['cell_type_2'].unique(), key=str)
+
                 # Plotting code using anndata data
                 x_coords = self.adata.obsm['spatial'][:, 0]
                 y_coords = self.adata.obsm['spatial'][:, 1]
@@ -197,26 +202,45 @@ class MainWindow(QMainWindow):
                 x_range = [rotated_x_coords.min(), rotated_x_coords.max()]
                 y_range = [rotated_y_coords.min(), rotated_y_coords.max()]
 
-                fig = px.scatter(x=rotated_x_coords,
-                                 y=rotated_y_coords,
-                                 color=self.adata.obs['cell_type_2'],
-                                 labels={'color': 'Clusters'})
+                fig = go.Figure()
 
-                fig.update_traces(marker=dict(size=2))
+                for category in cell_type_categories_sorted:
+                    mask = self.adata.obs['cell_type_2'] == category
+                    fig.add_trace(go.Scattergl(
+                        x=rotated_x_coords[mask],
+                        y=rotated_y_coords[mask],
+                        mode='markers',
+                        name=str(category),
+                        marker=dict(size=2, color=color_map[category])
+                    ))
 
                 fig.update_layout(
                     xaxis=dict(
                         scaleanchor="y",
                         scaleratio=1,
                         range=x_range,  # x축 범위 고정
-                        showticklabels=False  # x축 라벨과 수치 숨기기
+                        showticklabels=False,  # x축 라벨과 수치 숨기기
+                        title = ''
                     ),
                     yaxis=dict(
                         scaleanchor="x",
                         scaleratio=1,
                         range=y_range,  # y축 범위 고정
-                        showticklabels=False  # y축 라벨과 수치 숨기기
+                        showticklabels=False,  # y축 라벨과 수치 숨기기
+                        title = ''
                     ),
+                    legend=dict(
+                        font=dict(
+                            size=15
+                        ),
+                        itemsizing="constant",
+                        title=dict(
+                            font=dict(
+                                size=30
+                            )
+                        )
+                    ),
+                    legend_title_text = 'Clusters',
                     plot_bgcolor="white",
                     paper_bgcolor="white"
                 )
@@ -247,7 +271,7 @@ class MainWindow(QMainWindow):
                 axis = 180 / num
 
             if self.scatter_plot_radio_button.isChecked():
-                from math import ceil, sqrt
+                from math import ceil
 
                 # Plotting code using anndata data
                 x_coords = self.adata.obsm['spatial'][:, 0]
@@ -266,12 +290,22 @@ class MainWindow(QMainWindow):
 
                 num_genes = len(selected_genes)
 
-                fig, axes = subplots(1, num_genes, figsize=(5*num_genes,5))
+                if num_genes <= 4:
+                    rows = 1
+                    cols = num_genes
+                else:
+                    rows = ceil(num_genes / 4)
+                    cols = 4
                 
-                if num_genes == 1:
-                    axes = [axes]
+                if num_genes > 1:
+                    fig, axs = subplots(rows, cols, figsize=(cols*5, rows*5))
+                    axs = axs.flat
+                else:
+                    fig, ax = subplots(1, 1, figsize=(5,5))
+                    axs = [ax]
                 
-                for gene, ax in zip(selected_genes, axes):
+                for i, gene in enumerate(selected_genes):
+                    ax = axs[i]
                     gene_expression = self.adata[:, gene].X.toarray().flatten()
                     scatter = ax.scatter(x=rotated_x_coords,
                                          y=rotated_y_coords,
@@ -279,7 +313,11 @@ class MainWindow(QMainWindow):
                                          cmap='Purples', s=1)
                     ax.set_title(f'{gene}')
                     ax.axis('off')
+                    ax.set_aspect('equal', 'box')
                     colorbar(scatter, ax=ax)
+
+                for j in range(i+1, len(axs)):
+                    fig.delaxes(axs[j])                  
                 
             else:
                 from scanpy import plotting as pl

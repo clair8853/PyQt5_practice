@@ -3,7 +3,7 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
                              QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton,
-                             QListWidget, QListWidgetItem, QSplitter)
+                             QListWidget, QListWidgetItem, QSplitter, QDialog)
 import tempfile
 from PyQt5.QtCore import Qt, QUrl
 from numpy import array, cos, sin, dot, vstack, pi
@@ -28,6 +28,17 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.open_file)
         file_menu.addAction(open_action)
 
+        # Adding 'Tool' menu
+        tool_menu = menubar.addMenu('&Tool')
+
+        # Adding 'DEG Analysis' action
+        self.deg_action = QAction('DEG Analysis', self)
+        self.deg_action.setShortcut('Ctrl+A')
+        self.deg_action.setStatusTip('Differential Gene Expression Analysis')
+        self.deg_action.triggered.connect(self.open_deg_analysis)
+        self.deg_action.setEnabled(False)
+        tool_menu.addAction(self.deg_action)
+
         # Setting up the Status bar
         self.statusbar = self.statusBar()
         self.statusbar.showMessage('Ready')
@@ -51,7 +62,6 @@ class MainWindow(QMainWindow):
         # Main window settings
         self.setWindowTitle('PyQt5 Application')
         self.setGeometry(100, 100, 1200, 800)
-
 
     def setup_left_area(self, parent_splitter):
         # Create the left area
@@ -106,7 +116,6 @@ class MainWindow(QMainWindow):
         # Add the left panel to the parent splitter
         parent_splitter.addWidget(left_panel)
 
-
     def setup_central_area(self, parent_splitter):
         # Create the central area
         central_panel = QWidget()
@@ -115,13 +124,16 @@ class MainWindow(QMainWindow):
         self.central_layout.addWidget(self.web_view)
         parent_splitter.addWidget(central_panel)
     
-
     def open_file(self):
         if self.adata is not None:
-            reply = QMessageBox.question(self, 'Warning', "Loading a new file will overwrite the existing data. Do you want to continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-
+            reply = QMessageBox.question(
+                self, 'Warning', 
+                "Loading a new file will overwrite the existing data. Do you want to continue?", 
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No
+            )
             if reply == QMessageBox.No:
-                return  # Exit the function if the user chooses not to continue
+                return  # 사용자가 'No'를 선택하면 파일 로딩을 중단합니다.
 
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
@@ -133,35 +145,27 @@ class MainWindow(QMainWindow):
     def load_data(self, file_name):
         from scanpy import read_h5ad
         try:
-            # Load the data using scanpy's read_h5ad function
             self.adata = read_h5ad(file_name)
             self.update_ui_after_data_loaded(file_name)
+            self.deg_action.setEnabled(True)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
             print(f"Error loading file: {str(e)}")
 
     def update_ui_after_data_loaded(self, file_name):
-        # UI 업데이트 (데이터 로딩 후 처리)
         self.update_lists()
         self.plot_spatial_scatter()
-
         base_name = os.path.basename(file_name)
         self.statusbar.showMessage(f"Loaded '{base_name}'")
         print(f'Data loaded from: {base_name}')
 
     def update_lists(self):
-        # Update List
         if self.adata is not None:
             self.update_list(self.genes_list_widget, is_gene=True)
 
     def update_list(self, list_widget, is_gene=False):
-        # Clear the list widget before adding new items
         list_widget.clear()
-
-        # Extract and sort cluster or gene list
         items = sorted(self.adata.var_names.to_list()) if is_gene else sorted(self.adata.obs['cell_type_2'].unique())
-
-        # Populate the list widget with sorted items and add checkboxes
         for item in items:
             list_item = QListWidgetItem(item)
             list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
@@ -169,8 +173,8 @@ class MainWindow(QMainWindow):
             list_widget.addItem(list_item)
 
     def plot_spatial_scatter(self):
-        import plotly.express as px
-        
+        import plotly.graph_objects as go
+               
         axis = 360
         num = float(self.axis_input.text())
         if num > 0:
@@ -178,7 +182,11 @@ class MainWindow(QMainWindow):
         
         if self.adata is not None:
             try:
-                # Plotting code using anndata data
+                color_categories = self.adata.obs['cell_type_2'].astype('category').cat.categories
+                color_map = {category: color for category, color in zip(color_categories, self.adata.uns['cell_type_2_colors'])}
+
+                cell_type_categories_sorted = sorted(self.adata.obs['cell_type_2'].unique(), key=str)
+
                 x_coords = self.adata.obsm['spatial'][:, 0]
                 y_coords = self.adata.obsm['spatial'][:, 1]
 
@@ -193,41 +201,57 @@ class MainWindow(QMainWindow):
                 rotated_x_coords = rotated_coords[:, 0] + center_x
                 rotated_y_coords = rotated_coords[:, 1] + center_y
 
-                # 전체 데이터에 대한 x, y 축의 범위 설정
                 x_range = [rotated_x_coords.min(), rotated_x_coords.max()]
                 y_range = [rotated_y_coords.min(), rotated_y_coords.max()]
 
-                fig = px.scatter(x=rotated_x_coords,
-                                 y=rotated_y_coords,
-                                 color=self.adata.obs['cell_type_2'],
-                                 labels={'color': 'Clusters'})
+                fig = go.Figure()
 
-                fig.update_traces(marker=dict(size=2))
+                for category in cell_type_categories_sorted:
+                    mask = self.adata.obs['cell_type_2'] == category
+                    fig.add_trace(go.Scattergl(
+                        x=rotated_x_coords[mask],
+                        y=rotated_y_coords[mask],
+                        mode='markers',
+                        name=str(category),
+                        marker=dict(size=2, color=color_map[category])
+                    ))
 
                 fig.update_layout(
                     xaxis=dict(
                         scaleanchor="y",
                         scaleratio=1,
-                        range=x_range,  # x축 범위 고정
-                        showticklabels=False  # x축 라벨과 수치 숨기기
+                        range=x_range,
+                        showticklabels=False,
+                        title = ''
                     ),
                     yaxis=dict(
                         scaleanchor="x",
                         scaleratio=1,
-                        range=y_range,  # y축 범위 고정
-                        showticklabels=False  # y축 라벨과 수치 숨기기
+                        range=y_range,
+                        showticklabels=False,
+                        title = ''
                     ),
+                    legend=dict(
+                        font=dict(
+                            size=15
+                        ),
+                        itemsizing="constant",
+                        title=dict(
+                            font=dict(
+                                size=30
+                            )
+                        )
+                    ),
+                    legend_title_text = 'Clusters',
                     plot_bgcolor="white",
                     paper_bgcolor="white"
                 )
 
-                # Plot을 HTML로 변환하여 QWebEngineView에 표시
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as temp_file:
                     fig.write_html(temp_file.name)
                     self.web_view.setUrl(QUrl.fromLocalFile(temp_file.name))
 
             except Exception as e:
-                # Plotting 실패 시 경고 메시지 표시
                 QMessageBox.warning(self, 'Error', f'Could not plot data:\n{str(e)}')
         else:
             QMessageBox.warning(self, 'Error', 'No data loaded to plot.')
@@ -247,9 +271,8 @@ class MainWindow(QMainWindow):
                 axis = 180 / num
 
             if self.scatter_plot_radio_button.isChecked():
-                from math import ceil, sqrt
+                from math import ceil
 
-                # Plotting code using anndata data
                 x_coords = self.adata.obsm['spatial'][:, 0]
                 y_coords = self.adata.obsm['spatial'][:, 1]
 
@@ -266,12 +289,22 @@ class MainWindow(QMainWindow):
 
                 num_genes = len(selected_genes)
 
-                fig, axes = subplots(1, num_genes, figsize=(5*num_genes,5))
+                if num_genes <= 4:
+                    rows = 1
+                    cols = num_genes
+                else:
+                    rows = ceil(num_genes / 4)
+                    cols = 4
                 
-                if num_genes == 1:
-                    axes = [axes]
+                if num_genes > 1:
+                    fig, axs = subplots(rows, cols, figsize=(cols*5, rows*5))
+                    axs = axs.flat
+                else:
+                    fig, ax = subplots(1, 1, figsize=(5,5))
+                    axs = [ax]
                 
-                for gene, ax in zip(selected_genes, axes):
+                for i, gene in enumerate(selected_genes):
+                    ax = axs[i]
                     gene_expression = self.adata[:, gene].X.toarray().flatten()
                     scatter = ax.scatter(x=rotated_x_coords,
                                          y=rotated_y_coords,
@@ -279,7 +312,11 @@ class MainWindow(QMainWindow):
                                          cmap='Purples', s=1)
                     ax.set_title(f'{gene}')
                     ax.axis('off')
+                    ax.set_aspect('equal', 'box')
                     colorbar(scatter, ax=ax)
+
+                for j in range(i+1, len(axs)):
+                    fig.delaxes(axs[j])                  
                 
             else:
                 from scanpy import plotting as pl
@@ -291,6 +328,143 @@ class MainWindow(QMainWindow):
                     selected_genes.append('cell_type_2')
                     pl.umap(self.adata, color=selected_genes, ncols=4)
             show()
+
+    def open_deg_analysis(self):
+        if self.adata is None:
+            QMessageBox.warning(self, 'Error', 'No data loaded to perform DEG analysis.')
+            return
+        
+        dialog = DEGAnalysisDialog(self.adata, self)
+        dialog.show()
+
+class DEGAnalysisDialog(QDialog):
+    def __init__(self, adata, parent=None):
+        super().__init__(parent)
+        self.adata = adata
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('DEG Analysis')
+        self.setGeometry(200, 200, 600, 400)
+        layout = QVBoxLayout()
+
+        # Horizontal layout for Clusters and Other Clusters
+        clusters_layout = QHBoxLayout()
+
+        # Clusters selection
+        clusters_group_box = QGroupBox('Clusters')
+        clusters_vbox = QVBoxLayout(clusters_group_box)
+        self.clusters_list_widget = QListWidget()
+        self.populate_list(self.clusters_list_widget)
+        clusters_vbox.addWidget(self.clusters_list_widget)
+        clusters_layout.addWidget(clusters_group_box)
+
+        # Other Clusters selection
+        other_clusters_group_box = QGroupBox('Other Clusters')
+        other_clusters_vbox = QVBoxLayout(other_clusters_group_box)
+        self.other_clusters_list_widget = QListWidget()
+        self.populate_list(self.other_clusters_list_widget)
+        other_clusters_vbox.addWidget(self.other_clusters_list_widget)
+        clusters_layout.addWidget(other_clusters_group_box)
+
+        # Sync the 'Clusters' and 'Other Clusters' list widget
+        self.clusters_list_widget.itemChanged.connect(self.sync_lists)
+        self.other_clusters_list_widget.itemChanged.connect(self.sync_lists)
+
+        layout.addLayout(clusters_layout)
+
+        # Clear button
+        clear_button = QPushButton('Clear')
+        clear_button.clicked.connect(lambda: self.clear_selection(self.clusters_list_widget))
+        clear_button.clicked.connect(lambda: self.clear_selection(self.other_clusters_list_widget))
+        layout.addWidget(clear_button)
+        
+        # Start button
+        start_button = QPushButton('Start')
+        start_button.clicked.connect(self.run_deg_analysis)
+        layout.addWidget(start_button)
+
+        # Save button
+        save_button = QPushButton('Save')
+        save_button.clicked.connect(self.save_deg_result)
+        layout.addWidget(save_button)
+
+        self.setLayout(layout)
+
+    def populate_list(self, list_widget):
+        clusters = sorted(self.adata.obs['cell_type_2'].unique())
+        for cluster in clusters:
+            list_item = QListWidgetItem(cluster)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(list_item)
+    
+    def sync_lists(self, item):
+        self.clusters_list_widget.blockSignals(True)
+        self.other_clusters_list_widget.blockSignals(True)
+
+        if item.listWidget() == self.clusters_list_widget:
+            other_list = self.other_clusters_list_widget
+        else:
+            other_list = self.clusters_list_widget
+
+        for i in range(other_list.count()):
+            other_item = other_list.item(i)
+            if other_item.text() == item.text():
+                other_item.setFlags(other_item.flags() & ~Qt.ItemIsEnabled if item.checkState() == Qt.Checked else other_item.flags() | Qt.ItemIsEnabled)
+
+        self.clusters_list_widget.blockSignals(False)
+        self.other_clusters_list_widget.blockSignals(False)
+
+    def clear_selection(self, list_widget):
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            item.setCheckState(Qt.Unchecked)
+
+    def run_deg_analysis(self):
+        from scanpy import tools as tl
+        from scanpy import plotting as pl
+
+        self.selected_clusters = [item.text() for item in self.clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+        self.selected_other_clusters = [item.text() for item in self.other_clusters_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+
+        if not self.selected_clusters or not self.selected_other_clusters:
+            QMessageBox.warning(self, "Warning", "Please select at least one cluster in both Clusters and Other Clusters.")
+            return
+        
+        else:
+            merged_cluster_A = '_'.join(self.selected_clusters)
+            merged_cluster_B = '_'.join(self.selected_other_clusters)
+                        
+            self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_2']
+            self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype(str)
+            self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(self.selected_clusters)] = merged_cluster_A
+            self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(self.selected_other_clusters)] = merged_cluster_B                        
+            self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
+            
+            tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
+            pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
+    
+    def save_deg_result(self):
+        from pandas import DataFrame
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)", options=options)
+        if 'rank_genes_groups' in self.adata.uns:            
+            result = self.adata.uns['rank_genes_groups']
+            groups = result['names'].dtype.names            
+            result_df = DataFrame(
+                {group + '_' + key: result[key][group]
+                for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
+            )
+            if filePath:
+                if not filePath.endswith('.csv'):
+                    filePath += '.csv'
+                result_df.to_csv(filePath, index=False)
+                info = f"Data saved: {filePath}"
+                self.statusBar().showMessage(info)                     
+        else:
+            QMessageBox.critical(self, "Error", f"No results to save. Please run the analysis first.")
 
 if __name__ == '__main__':
     from multiprocessing import freeze_support
