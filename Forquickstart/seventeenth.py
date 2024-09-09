@@ -5,10 +5,12 @@ from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
                              QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
-                             QListWidget, QListWidgetItem, QSplitter, QDialog)
-import tempfile
+                             QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from numpy import array, cos, sin, dot, vstack, pi
+import tempfile
+import gc
+import plotly.graph_objects as go
 
 
 class DataProcessingThread(QThread):
@@ -47,6 +49,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.adata = None  # Holds the loaded data
         self.progress_bar = None  # Progress bar for file loading
+        self.font_settings = {"family": "Arial", "size": 15}  # Default font settings for plotly legend
         self.initUI()
 
     def initUI(self):
@@ -58,7 +61,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
 
     def setup_menu_bar(self):
-        # Setup the menu bar with 'File' and 'Tool' menus
+        # Setup the menu bar with 'File', 'Tool', and 'Font' menus
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
         open_action = QAction('File Open', self)
@@ -72,6 +75,19 @@ class MainWindow(QMainWindow):
         self.deg_action.triggered.connect(self.open_deg_analysis)
         self.deg_action.setEnabled(False)
         tool_menu.addAction(self.deg_action)
+
+        # Add Font menu for changing font in Plotly plots and main layout
+        font_menu = menubar.addMenu('&Font')
+        
+        # Font for Plotly
+        font_action = QAction('Main App Window', self)
+        font_action.triggered.connect(self.change_font_for_plot)
+        font_menu.addAction(font_action)
+
+        # Font for Main Layout
+        layout_font_action = QAction('Main Layout', self)
+        layout_font_action.triggered.connect(self.change_font_for_layout)
+        font_menu.addAction(layout_font_action)
 
     def setup_status_bar(self):
         # Setup the status bar with a progress bar
@@ -93,7 +109,7 @@ class MainWindow(QMainWindow):
         self.setup_left_area(main_splitter)
         self.setup_central_area(main_splitter)
         
-        main_splitter.setSizes([200, 1000])
+        main_splitter.setSizes([100, 1100])
 
     def setup_left_area(self, parent_splitter):
         # Setup the left panel with spatial plot and gene list options
@@ -154,10 +170,33 @@ class MainWindow(QMainWindow):
         start_button.clicked.connect(self.plot_genes)
 
         layout.addWidget(self.dot_plot_radio_button, 0, 0)
-        layout.addWidget(self.violin_plot_radio_button, 0, 1)
-        layout.addWidget(self.feature_plot_radio_button, 1, 0)
-        layout.addWidget(self.scatter_plot_radio_button, 1, 1)
-        layout.addWidget(start_button, 2, 0, 1, 2)
+        layout.addWidget(self.violin_plot_radio_button, 1, 0)
+        layout.addWidget(self.feature_plot_radio_button, 2, 0)
+        layout.addWidget(self.scatter_plot_radio_button, 3, 0)
+        layout.addWidget(start_button, 4, 0, 1, 2)
+    
+    def change_font_for_layout(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Apply the font to the entire layout
+            self.setFont(font)
+            self.update_layout_font(self.central_widget, font)
+    
+    def update_layout_font(self, widget, font):
+        # Recursively apply the font to all child widgets
+        widget.setFont(font)
+        for child in widget.findChildren(QWidget):
+            child.setFont(font)
+
+    def change_font_for_plot(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Update the font settings for plotly legend
+            self.font_settings["family"] = font.family()
+            self.font_settings["size"] = font.pointSize()
+            self.plot_spatial_scatter()
 
     def open_file(self):
         # Open file dialog to load an h5ad file
@@ -214,12 +253,10 @@ class MainWindow(QMainWindow):
             item.setCheckState(Qt.Unchecked)
 
     def plot_spatial_scatter(self):
-        import gc
         # Plot the spatial scatter plot using Plotly
         if self.adata is None:
             return
         
-        import plotly.graph_objects as go
         axis = self.get_rotation_axis()
 
         try:
@@ -241,13 +278,16 @@ class MainWindow(QMainWindow):
                     marker=dict(size=2, color=color_map[category])
                 ))
 
-            # Update plot layout
+            # Apply custom font to legend
             fig.update_layout(
-                    xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
-                    yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
-                    legend=dict(font=dict(size=15), itemsizing="constant", title=dict(font=dict(size=30))),
-                    plot_bgcolor="white", paper_bgcolor="white"
-                )
+                xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
+                yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
+                legend=dict(
+                    font=dict(family=self.font_settings["family"], size=self.font_settings["size"]),
+                    itemsizing="constant"
+                ),
+                plot_bgcolor="white", paper_bgcolor="white"
+            )
 
             self.display_plot(fig)
 
@@ -255,7 +295,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Error', f'Could not plot data:\n{str(e)}')
         finally:
             gc.collect()
-
+    
     def plot_genes(self):
         # Plot selected genes using matplotlib
         from matplotlib.pyplot import subplots, colorbar, show
@@ -284,7 +324,7 @@ class MainWindow(QMainWindow):
             for i, gene in enumerate(selected_genes):
                 gene_expression = self.adata[:, gene].X.toarray().flatten()
                 ax = axs[i]
-                scatter = ax.scatter(x=rotated_x_coords, y=rotated_y_coords, c=gene_expression, cmap='Purples', s=0.5, edgecolors='none')
+                scatter = ax.scatter(x=rotated_x_coords, y=rotated_y_coords, c=gene_expression, cmap='Purples', s=0.1, edgecolors='none')
                 ax.set_title(gene)
                 ax.axis('off')
                 ax.set_aspect('equal', 'box')
@@ -335,7 +375,6 @@ class MainWindow(QMainWindow):
 
         dialog = DEGAnalysisDialog(self.adata, self)
         dialog.show()
-
 
 class DEGAnalysisDialog(QDialog):
     def __init__(self, adata, parent=None):

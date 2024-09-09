@@ -2,13 +2,17 @@ import sys
 import matplotlib
 matplotlib.use('Qt5Agg')
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, 
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QHBoxLayout,
                              QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
-                             QListWidget, QListWidgetItem, QSplitter, QDialog)
-import tempfile
+                             QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog,
+                             QTextBrowser, QComboBox)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
+from PIL import Image, ImageOps
 from numpy import array, cos, sin, dot, vstack, pi
+import tempfile
+import gc
+import plotly.graph_objects as go
 
 
 class DataProcessingThread(QThread):
@@ -47,6 +51,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.adata = None  # Holds the loaded data
         self.progress_bar = None  # Progress bar for file loading
+        self.selected_metadata = 'cell_type_2'
+        self.font_settings = {"family": "Arial", "size": 15}  # Default font settings for plotly legend
         self.initUI()
 
     def initUI(self):
@@ -58,7 +64,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
 
     def setup_menu_bar(self):
-        # Setup the menu bar with 'File' and 'Tool' menus
+        # Setup the menu bar with 'File', 'Tool', and 'Font' menus
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
         open_action = QAction('File Open', self)
@@ -72,6 +78,24 @@ class MainWindow(QMainWindow):
         self.deg_action.triggered.connect(self.open_deg_analysis)
         self.deg_action.setEnabled(False)
         tool_menu.addAction(self.deg_action)
+
+        self.image_action = QAction('In-Situ Hybridization', self)
+        self.image_action.setShortcut('Ctrl+I')
+        self.image_action.triggered.connect(self.open_image_merge)
+        tool_menu.addAction(self.image_action)
+
+        # Add Font menu for changing font in Plotly plots and main layout
+        font_menu = menubar.addMenu('&Font')
+        
+        # Font for Plotly
+        font_action = QAction('Main App Window', self)
+        font_action.triggered.connect(self.change_font_for_plot)
+        font_menu.addAction(font_action)
+
+        # Font for Main Layout
+        layout_font_action = QAction('Main Layout', self)
+        layout_font_action.triggered.connect(self.change_font_for_layout)
+        font_menu.addAction(layout_font_action)
 
     def setup_status_bar(self):
         # Setup the status bar with a progress bar
@@ -93,7 +117,7 @@ class MainWindow(QMainWindow):
         self.setup_left_area(main_splitter)
         self.setup_central_area(main_splitter)
         
-        main_splitter.setSizes([200, 1000])
+        main_splitter.setSizes([100, 1100])
 
     def setup_left_area(self, parent_splitter):
         # Setup the left panel with spatial plot and gene list options
@@ -154,10 +178,34 @@ class MainWindow(QMainWindow):
         start_button.clicked.connect(self.plot_genes)
 
         layout.addWidget(self.dot_plot_radio_button, 0, 0)
-        layout.addWidget(self.violin_plot_radio_button, 0, 1)
-        layout.addWidget(self.feature_plot_radio_button, 1, 0)
-        layout.addWidget(self.scatter_plot_radio_button, 1, 1)
-        layout.addWidget(start_button, 2, 0, 1, 2)
+        layout.addWidget(self.violin_plot_radio_button, 1, 0)
+        layout.addWidget(self.feature_plot_radio_button, 2, 0)
+        layout.addWidget(self.scatter_plot_radio_button, 3, 0)
+        layout.addWidget(start_button, 4, 0, 1, 2)
+    
+    def change_font_for_layout(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Apply the font to the entire layout
+            self.setFont(font)
+            self.update_layout_font(self.central_widget, font)
+            self.metadata_selector.setFont(font)
+    
+    def update_layout_font(self, widget, font):
+        # Recursively apply the font to all child widgets
+        widget.setFont(font)
+        for child in widget.findChildren(QWidget):
+            child.setFont(font)
+
+    def change_font_for_plot(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Update the font settings for plotly legend
+            self.font_settings["family"] = font.family()
+            self.font_settings["size"] = font.pointSize()
+            self.plot_spatial_scatter()
 
     def open_file(self):
         # Open file dialog to load an h5ad file
@@ -197,11 +245,12 @@ class MainWindow(QMainWindow):
         self.deg_action.setEnabled(True)
         self.progress_bar.setValue(100)
         self.statusbar.showMessage("Data loaded successfully.")
+        self.setup_metadata_selector()
 
     def update_list(self, list_widget, is_gene=False):
         # Update the list widget with gene or cluster data
         list_widget.clear()
-        items = sorted(self.adata.var_names.to_list()) if is_gene else sorted(self.adata.obs['cell_type_2'].unique())
+        items = sorted(self.adata.var_names.to_list()) if is_gene else sorted(self.adata.obs[self.selected_metadata].unique())
         for item in items:
             list_item = QListWidgetItem(item)
             list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
@@ -212,42 +261,60 @@ class MainWindow(QMainWindow):
         for i in range(self.genes_list_widget.count()):
             item = self.genes_list_widget.item(i)
             item.setCheckState(Qt.Unchecked)
+    
+    def setup_metadata_selector(self):
+        if self.adata is None:
+            return
+
+        metadata_layout = self.central_widget.layout()
+        self.metadata_selector = QComboBox(self)
+        self.metadata_selector.addItems(self.adata.obs.columns)
+        self.metadata_selector.currentTextChanged.connect(self.on_metadata_selected)
+        metadata_layout.insertWidget(0, self.metadata_selector)
+        self.metadata_selector.setFont(self.font())
+
+    def on_metadata_selected(self, selected_metadata):
+        self.selected_metadata = selected_metadata
+        self.plot_spatial_scatter()
+
 
     def plot_spatial_scatter(self):
-        import gc
         # Plot the spatial scatter plot using Plotly
         if self.adata is None:
             return
         
-        import plotly.graph_objects as go
         axis = self.get_rotation_axis()
 
         try:
             # Retrieve data for plotting
-            color_categories = self.adata.obs['cell_type_2'].astype('category').cat.categories
-            color_map = {category: color for category, color in zip(color_categories, self.adata.uns['cell_type_2_colors'])}
+            color_categories = self.adata.obs[self.selected_metadata].astype('category').cat.categories
+            color_uns = self.selected_metadata + "_colors"
+            color_map = {category: color for category, color in zip(color_categories, self.adata.uns[color_uns])}
 
-            cell_type_categories_sorted = sorted(self.adata.obs['cell_type_2'].unique(), key=str)
+            cell_type_categories_sorted = sorted(self.adata.obs[self.selected_metadata].unique(), key=str)
 
             rotated_x_coords, rotated_y_coords = self.rotate_coords(axis)
             fig = go.Figure()
 
             # Plot each category as a separate trace
             for category in cell_type_categories_sorted:
-                mask = self.adata.obs['cell_type_2'] == category
+                mask = self.adata.obs[self.selected_metadata] == category
                 fig.add_trace(go.Scattergl(
                     x=rotated_x_coords[mask], y=rotated_y_coords[mask],
                     mode='markers', name=str(category),
                     marker=dict(size=2, color=color_map[category])
                 ))
 
-            # Update plot layout
+            # Apply custom font to legend
             fig.update_layout(
-                    xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
-                    yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
-                    legend=dict(font=dict(size=15), itemsizing="constant", title=dict(font=dict(size=30))),
-                    plot_bgcolor="white", paper_bgcolor="white"
-                )
+                xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
+                yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
+                legend=dict(
+                    font=dict(family=self.font_settings["family"], size=self.font_settings["size"]),
+                    itemsizing="constant"
+                ),
+                plot_bgcolor="white", paper_bgcolor="white"
+            )
 
             self.display_plot(fig)
 
@@ -255,7 +322,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Error', f'Could not plot data:\n{str(e)}')
         finally:
             gc.collect()
-
+    
     def plot_genes(self):
         # Plot selected genes using matplotlib
         from matplotlib.pyplot import subplots, colorbar, show
@@ -284,7 +351,7 @@ class MainWindow(QMainWindow):
             for i, gene in enumerate(selected_genes):
                 gene_expression = self.adata[:, gene].X.toarray().flatten()
                 ax = axs[i]
-                scatter = ax.scatter(x=rotated_x_coords, y=rotated_y_coords, c=gene_expression, cmap='Purples', s=0.5, edgecolors='none')
+                scatter = ax.scatter(x=rotated_x_coords, y=rotated_y_coords, c=gene_expression, cmap='Purples', s=0.1, edgecolors='none')
                 ax.set_title(gene)
                 ax.axis('off')
                 ax.set_aspect('equal', 'box')
@@ -296,11 +363,11 @@ class MainWindow(QMainWindow):
             # Use Scanpy for other plot types (dot, violin, feature plot)
             from scanpy import plotting as pl
             if self.dot_plot_radio_button.isChecked():
-                pl.dotplot(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
+                pl.dotplot(self.adata, selected_genes, groupby=self.selected_metadata, categories_order=sorted(self.adata.obs[self.selected_metadata].unique()))
             elif self.violin_plot_radio_button.isChecked():
-                pl.stacked_violin(self.adata, selected_genes, groupby="cell_type_2", categories_order=sorted(self.adata.obs['cell_type_2'].unique()))
+                pl.stacked_violin(self.adata, selected_genes, groupby=self.selected_metadata, categories_order=sorted(self.adata.obs[self.selected_metadata].unique()))
             elif self.feature_plot_radio_button.isChecked():
-                selected_genes.append('cell_type_2')
+                selected_genes.append(self.selected_metadata)
                 pl.umap(self.adata, color=selected_genes, ncols=4)
         show()
         gc.collect()
@@ -333,14 +400,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Error', 'No data loaded to perform DEG analysis.')
             return
 
-        dialog = DEGAnalysisDialog(self.adata, self)
+        dialog = DEGAnalysisDialog(self.adata, self.selected_metadata, self)
         dialog.show()
 
+    def open_image_merge(self):
+        dialog = ImageMergeDialog(self)
+        dialog.show()
 
 class DEGAnalysisDialog(QDialog):
-    def __init__(self, adata, parent=None):
+    def __init__(self, adata, selected_metadata, parent=None):
         super().__init__(parent)
         self.adata = adata
+        self.selected_metadata = selected_metadata
         self.initUI()
 
     def initUI(self):
@@ -380,11 +451,11 @@ class DEGAnalysisDialog(QDialog):
 
     def populate_clusters_list(self, list_widget):
         # Populate the clusters list with unique cluster values
-        self.populate_list(list_widget, self.adata.obs['cell_type_2'].unique())
+        self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
 
     def populate_other_clusters_list(self, list_widget):
         # Populate the other clusters list with unique cluster values
-        self.populate_list(list_widget, self.adata.obs['cell_type_2'].unique())
+        self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
 
     def populate_list(self, list_widget, items):
         # Helper function to populate a list widget with items
@@ -426,7 +497,7 @@ class DEGAnalysisDialog(QDialog):
         merged_cluster_A = '_'.join(selected_clusters)
         merged_cluster_B = '_'.join(selected_other_clusters)
 
-        self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_2'].astype(str)
+        self.adata.obs['cell_type_3'] = self.adata.obs[self.selected_metadata].astype(str)
         self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_clusters)] = merged_cluster_A
         self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_other_clusters)] = merged_cluster_B                        
         self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
@@ -456,6 +527,137 @@ class DEGAnalysisDialog(QDialog):
                 self.statusBar().showMessage(f"Data saved: {filePath}")
         else:
             QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
+
+class ImageMergeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('RGB Image')
+        self.setGeometry(100, 100, 600, 300)
+
+        sub_layout = QVBoxLayout()
+
+        self.red_group = self.create_group_box("Red")
+        self.green_group = self.create_group_box("Green")
+        self.blue_group = self.create_group_box("Blue")
+        self.blue_group.setCheckable(True)
+        self.blue_group.setChecked(False)
+
+        self.blue_group.toggled.connect(self.toggle_blue)
+
+        sub_layout.addWidget(self.red_group)
+        sub_layout.addWidget(self.green_group)
+        sub_layout.addWidget(self.blue_group)
+
+        clear_button = QPushButton("Clear", self)
+        clear_button.clicked.connect(self.clear_file_paths)
+
+        start_button = QPushButton("Start", self)
+        start_button.clicked.connect(self.process_images)
+
+        sub_layout.addWidget(clear_button)
+        sub_layout.addWidget(start_button)
+
+        self.setLayout(sub_layout)
+
+    def create_group_box(self, title):
+        group_box = QGroupBox(title)
+
+        h_layout = QHBoxLayout()
+
+        text_browser = QTextBrowser(self)
+        text_browser.setPlaceholderText(f"Please select {title} file path")
+        text_browser.setFixedHeight(30)
+
+        button = QPushButton("...", self)
+        button.clicked.connect(lambda: self.show_file_dialog(text_browser))
+
+        h_layout.addWidget(text_browser)
+        h_layout.addWidget(button)
+
+        group_box.setLayout(h_layout)
+
+        group_box.text_browser = text_browser
+        return group_box
+    
+    def show_file_dialog(self, text_browser):
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select PNG File", "", "PNG Files (*.png)", options=options)
+
+        if file_path:
+            text_browser.setText(file_path)
+
+    def toggle_blue(self, checked):
+        if not checked:
+            self.blue_group.text_browser.clear()
+
+    def clear_file_paths(self):
+        self.red_group.text_browser.clear()
+        self.green_group.text_browser.clear()
+        self.blue_group.text_browser.clear()
+
+    def process_images(self):
+        red_file = self.red_group.text_browser.toPlainText()
+        green_file = self.green_group.text_browser.toPlainText()
+        blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
+
+        if not red_file or not green_file:
+            QMessageBox.warning(self, "Warning", "Please select Red and Green files.")
+            return
+
+        if blue_file:
+            self.merge_images([red_file, green_file, blue_file])
+        else:
+            self.merge_images([red_file, green_file])
+
+    def process_images_common(self, image_path):
+        image = Image.open(image_path)
+        bw_image = image.convert('L')
+        inverted_image = ImageOps.invert(bw_image)
+        return inverted_image.convert('RGB')
+    
+    def channel_image(self, inverted_image, color):
+        if color == 'red':
+            red_channel = inverted_image.split()[0]
+            green_channel = Image.new('L', inverted_image.size, 0)
+            blue_channel = Image.new('L', inverted_image.size, 0)
+        elif color == 'green':
+            green_channel = inverted_image.split()[1]
+            red_channel = Image.new('L', inverted_image.size, 0)
+            blue_channel = Image.new('L', inverted_image.size, 0)
+        elif color == 'blue':
+            blue_channel = inverted_image.split()[2]
+            green_channel = Image.new('L', inverted_image.size, 0)
+            red_channel = Image.new('L', inverted_image.size, 0)
+        
+        channel_image = Image.merge('RGB', (red_channel, green_channel, blue_channel))
+
+        new_size = (int(channel_image.width * 10), int(channel_image.height * 10))
+        high_res_image = channel_image.resize(new_size, Image.Resampling.LANCZOS)
+
+        high_res_image.show()
+
+    def merge_images(self, image_paths):
+        red_image = self.process_images_common(image_paths[0])
+        green_image = self.process_images_common(image_paths[1])
+
+        if len(image_paths) == 3:
+            blue_image = self.process_images_common(image_paths[2])
+            channels = [red_image.split()[0], green_image.split()[1], blue_image.split()[2]]
+            self.channel_image(blue_image, 'blue')
+        else:
+            channels = [red_image.split()[0], green_image.split()[1], Image.new('L', red_image.size, 0)]
+
+        merged_image = Image.merge('RGB', channels)
+
+        self.channel_image(red_image, 'red')
+        self.channel_image(green_image, 'green')
+
+        new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
+        high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
+        high_res_image.show()   
 
 
 if __name__ == '__main__':
