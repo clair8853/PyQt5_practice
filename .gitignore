@@ -14,3 +14,5 @@ main.spec
 share
 myenv
 *.spec
+*.png
+*.jpg
