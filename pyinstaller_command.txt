@@ -1,8 +1,9 @@
-pyinstaller --onedir --windowed --strip --name=MyWindowsApp --hidden-import=scanpy --hidden-import=numpy --hidden-import=matplotlib --hidden-import=pandas --hidden-import=matplotlib.backends.backend_qt5agg --exclude-module=tkinter --exclude-module=PyQt5.QtTest --exclude-module=PyQt5.QtMultimedia --exclude-module=PyQt5.QtOpenGL --exclude-module=IPython all.py
+Window:
+
+pyinstaller --onefile --windowed --strip --name="Merscope Visualizer" --add-data "C:/Users/visiu/Documents/pyqt5_proj/myenv/Lib/site-packages/PyQt5/Qt5/resources:resources" --hidden-import=scanpy --hidden-import=pandas --hidden-import=matplotlib.backends.backend_qt5agg --hidden-import=PyQt5.QtWebEngineWidgets --hidden-import=PyQt5.QtWebEngineCore --exclude-module=tkinter --exclude-module=PyQt5.QtTest --exclude-module=PyQt5.QtMultimedia --exclude-module=PyQt5.QtOpenGL --exclude-module=IPython all.py
 
 
 
-pyinstaller --onedir --windowed --strip --name=MyWindowsApp --add-data "C:/Users/visiu/Documents/pyqt5_proj/Lib/site-packages/PyQt5/Qt5/resources:resources" --hidden-import=scanpy --hidden-import=scanpy.plotting --hidden-import=numpy --hidden-import=matplotlib --hidden-import=matplotlib.backends.backend_qt5agg --hidden-import=matplotlib.pyplot --hidden-import=pandas --hidden-import=matplotlib.transforms --hidden-import=matplotlib.colors --hidden-import=PyQt5.QtWebEngineWidgets --hidden-import=PyQt5.QtWebEngineCore --exclude-module=tkinter --exclude-module=PyQt5.QtTest --exclude-module=PyQt5.QtMultimedia --exclude-module=PyQt5.QtOpenGL --exclude-module=IPython all.py
 
 
 
@@ -19,10 +20,3 @@ pyinstaller --onedir --windowed --name="Merscope Visualizer" \
 --exclude-module=PyQt5.QtMultimedia \
 --exclude-module=PyQt5.QtOpenGL\
 --exclude-module=IPython all.py
-
-
-
-
---add-binary="/Users/mmbd7267/Development/PyQt5_practice/myenv/lib/python3.12/site-packages/PyQt5/Qt5/lib/QtWebEngineCore.framework/Helpers/QtWebEngineProcess.app/Contents/MacOS/QtWebEngineProcess:Qt5/lib/QtWebEngineProcess" \
---add-data="/Users/mmbd7267/Development/PyQt5_practice/myenv/lib/python3.12/site-packages/PyQt5/Qt5/lib/QtWebEngineCore.framework:Qt5/lib/QtWebEngineCore.framework" \
---add-data="/Users/mmbd7267/Development/PyQt5_practice/myenv/lib/python3.12/site-packages/PyQt5/Qt5/translations:Qt5/translations" \
