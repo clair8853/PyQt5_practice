@@ -10,9 +10,6 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QH
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PIL import Image, ImageOps
 from numpy import array, cos, sin, dot, vstack, pi
-import tempfile
-import gc
-import plotly.graph_objects as go
 
 
 class DataProcessingThread(QThread):
@@ -60,7 +57,7 @@ class MainWindow(QMainWindow):
         self.setup_menu_bar()
         self.setup_status_bar()
         self.setup_main_layout()
-        self.setWindowTitle('PyQt5 Application')
+        self.setWindowTitle('Merscope Visualizer')
         self.setGeometry(100, 100, 1200, 800)
 
     def setup_menu_bar(self):
@@ -79,23 +76,23 @@ class MainWindow(QMainWindow):
         self.deg_action.setEnabled(False)
         tool_menu.addAction(self.deg_action)
 
-        self.image_action = QAction('In-Situ Hybridization', self)
+        self.image_action = QAction('RGB Image', self)
         self.image_action.setShortcut('Ctrl+I')
         self.image_action.triggered.connect(self.open_image_merge)
         tool_menu.addAction(self.image_action)
 
         # Add Font menu for changing font in Plotly plots and main layout
         font_menu = menubar.addMenu('&Font')
-        
-        # Font for Plotly
-        font_action = QAction('Main App Window', self)
-        font_action.triggered.connect(self.change_font_for_plot)
-        font_menu.addAction(font_action)
-
+    
         # Font for Main Layout
-        layout_font_action = QAction('Main Layout', self)
+        layout_font_action = QAction('Main Layout Font', self)
         layout_font_action.triggered.connect(self.change_font_for_layout)
         font_menu.addAction(layout_font_action)
+
+        # Font for Plotly
+        font_action = QAction('Main Plot Font', self)
+        font_action.triggered.connect(self.change_font_for_plot)
+        font_menu.addAction(font_action)
 
     def setup_status_bar(self):
         # Setup the status bar with a progress bar
@@ -279,6 +276,8 @@ class MainWindow(QMainWindow):
 
 
     def plot_spatial_scatter(self):
+        import gc
+        import plotly.graph_objects as go
         # Plot the spatial scatter plot using Plotly
         if self.adata is None:
             return
@@ -325,7 +324,7 @@ class MainWindow(QMainWindow):
     
     def plot_genes(self):
         # Plot selected genes using matplotlib
-        from matplotlib.pyplot import subplots, colorbar, show
+        #from matplotlib.pyplot import subplots, colorbar, show
         import gc
 
         if self.adata is None:
@@ -344,7 +343,7 @@ class MainWindow(QMainWindow):
             rows, cols = (1, num_genes) if num_genes <= 4 else ((num_genes + 3) // 4, 4)
 
             # Create subplots for multiple genes
-            fig, axs = subplots(rows, cols, figsize=(cols * 5, rows * 5))
+            fig, axs = matplotlib.pyplot.subplots(rows, cols, figsize=(cols * 5, rows * 5))
             axs = axs.flat if num_genes > 1 else [axs]
 
             # Plot each gene in a separate subplot
@@ -355,7 +354,7 @@ class MainWindow(QMainWindow):
                 ax.set_title(gene)
                 ax.axis('off')
                 ax.set_aspect('equal', 'box')
-                colorbar(scatter, ax=ax)
+                matplotlib.pyplot.colorbar(scatter, ax=ax)
 
             for j in range(i + 1, len(axs)):
                 fig.delaxes(axs[j])
@@ -369,7 +368,7 @@ class MainWindow(QMainWindow):
             elif self.feature_plot_radio_button.isChecked():
                 selected_genes.append(self.selected_metadata)
                 pl.umap(self.adata, color=selected_genes, ncols=4)
-        show()
+        matplotlib.pyplot.show()
         gc.collect()
 
     def get_rotation_axis(self):
@@ -389,6 +388,7 @@ class MainWindow(QMainWindow):
         return rotated_coords[:, 0] + center_x, rotated_coords[:, 1] + center_y
 
     def display_plot(self, fig):
+        import tempfile
         # Display the generated plot in the central web view
         with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as temp_file:
             fig.write_html(temp_file.name)

@@ -1,0 +1,9 @@
+PyQt5
+PyQtWebEngine
+matplotlib
+Pillow
+numpy
+plotly
+scanpy
+pandas
+pyinstaller
