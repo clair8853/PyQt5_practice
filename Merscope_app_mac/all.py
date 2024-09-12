@@ -155,14 +155,20 @@ class MainWindow(QMainWindow):
         layout.addWidget(start_button, 1, 0, 1, 2)
 
     def create_genes_list(self, layout):
+        # Text widget fot searching target gene
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setPlaceholderText("Enter the target gene")
+        self.search_bar.textChanged.connect(self.search_list)
+        layout.addWidget(self.search_bar, 0, 0, 1, 2)
+
         # Gene list widget for selecting genes to analyze
         self.genes_list_widget = QListWidget()
-        layout.addWidget(self.genes_list_widget, 0, 0, 1, 2)
+        layout.addWidget(self.genes_list_widget, 1, 0, 1, 2)
 
         # Adding a "Clear" button under the Genes list
         clear_button = QPushButton('Clear')
         clear_button.clicked.connect(self.clear_gene_selection)
-        layout.addWidget(clear_button, 1, 0, 1, 2)
+        layout.addWidget(clear_button, 2, 0, 1, 2)
 
     def create_plotting_controls(self, layout):
         # Plotting control options for different plot types
@@ -237,12 +243,33 @@ class MainWindow(QMainWindow):
 
     def update_ui_after_data_loaded(self):
         # Update the UI after data is loaded successfully
+        self.all_genes = self.adata.var_names.to_list()
         self.update_list(self.genes_list_widget, is_gene=True)
         self.plot_spatial_scatter()
         self.deg_action.setEnabled(True)
         self.progress_bar.setValue(100)
         self.statusbar.showMessage("Data loaded successfully.")
         self.setup_metadata_selector()
+    
+    def search_list(self):
+        search_text = self.search_bar.text().lower()
+
+        if not search_text:
+            self.update_list_with_checked_items(self.genes_list_widget, self.all_genes)
+            return
+
+        filtered_items = [item for item in self.all_genes if search_text in item.lower()]
+        self.update_list_with_checked_items(self.genes_list_widget, filtered_items)
+    
+    def update_list_with_checked_items(self, list_widget, items):
+        checked_items = {list_widget.item(i).text(): list_widget.item(i).checkState() for i in range(list_widget.count())}
+        
+        list_widget.clear()
+        for item in items:
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(checked_items.get(item, Qt.Unchecked))  # 이전 체크 상태를 유지
+            list_widget.addItem(list_item)
 
     def update_list(self, list_widget, is_gene=False):
         # Update the list widget with gene or cluster data
@@ -262,6 +289,11 @@ class MainWindow(QMainWindow):
     def setup_metadata_selector(self):
         if self.adata is None:
             return
+        
+        if hasattr(self, 'metadata_selector'):
+            self.central_widget.layout().removeWidget(self.metadata_selector)
+            self.metadata_selector.deleteLater()
+            self.metadata_selector = None
 
         metadata_layout = self.central_widget.layout()
         self.metadata_selector = QComboBox(self)
@@ -273,7 +305,6 @@ class MainWindow(QMainWindow):
     def on_metadata_selected(self, selected_metadata):
         self.selected_metadata = selected_metadata
         self.plot_spatial_scatter()
-
 
     def plot_spatial_scatter(self):
         import gc
@@ -433,6 +464,11 @@ class DEGAnalysisDialog(QDialog):
         layout.addWidget(self.create_button('Clear', self.clear_selection))
         layout.addWidget(self.create_button('Start', self.run_deg_analysis))
         layout.addWidget(self.create_button('Save', self.save_deg_result))
+
+        # Sync the 'Clusters' and 'Other Clusters' list widget
+        self.clusters_list_widget.itemChanged.connect(self.sync_lists)
+        self.other_clusters_list_widget.itemChanged.connect(self.sync_lists)
+
         self.setLayout(layout)
 
     def create_group_box(self, title, layout, row, col, populate_func, list_widget):
@@ -465,6 +501,23 @@ class DEGAnalysisDialog(QDialog):
             list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
             list_item.setCheckState(Qt.Unchecked)
             list_widget.addItem(list_item)
+    
+    def sync_lists(self, item):
+        self.clusters_list_widget.blockSignals(True)
+        self.other_clusters_list_widget.blockSignals(True)
+
+        if item.listWidget() == self.clusters_list_widget:
+            other_list = self.other_clusters_list_widget
+        else:
+            other_list = self.clusters_list_widget
+
+        for i in range(other_list.count()):
+            other_item = other_list.item(i)
+            if other_item.text() == item.text():
+                other_item.setFlags(other_item.flags() & ~Qt.ItemIsEnabled if item.checkState() == Qt.Checked else other_item.flags() | Qt.ItemIsEnabled)
+
+        self.clusters_list_widget.blockSignals(False)
+        self.other_clusters_list_widget.blockSignals(False)
 
     def clear_selection(self):
         # Clear the selection in both clusters and other clusters lists
