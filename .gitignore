@@ -1,16 +1,13 @@
-Include
-Scripts
-Lib
 *.cfg
 *.pyc
 *~
 .DS_Store
 bin
 *.hdf5
+*.h5ad
 *.zip
 build
 dist
-main.spec
 share
 myenv
 *.spec
