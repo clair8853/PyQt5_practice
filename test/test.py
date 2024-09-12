@@ -1,167 +1,940 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QFileDialog, QTextBrowser, QVBoxLayout, QHBoxLayout, QGroupBox, QWidget, QCheckBox
-from PyQt5.QtCore import Qt
+import matplotlib
+matplotlib.use('Qt5Agg')
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QHBoxLayout,
+                             QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
+                             QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
+                             QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog,
+                             QTextBrowser, QComboBox)
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PIL import Image, ImageOps
-import os
+from numpy import array, cos, sin, dot, vstack, pi
 
-class FileDialogDemo(QMainWindow):
+
+class DataProcessingThread(QThread):
+    # Signal for progress update and processing finish
+    progress_changed = pyqtSignal(int)
+    processing_finished = pyqtSignal(object)
+
+    def __init__(self, file_name, parent=None):
+        super().__init__(parent)
+        self.file_name = file_name
+        self.adata = None
+
+    def run(self):
+        from scanpy import read_h5ad
+        # Emit signal for the start of file loading
+        self.progress_changed.emit(10)
+        try:
+            # Load the file and update progress
+            self.adata = read_h5ad(self.file_name)
+            self.progress_changed.emit(50)
+        except Exception as e:
+            # In case of an error, emit signal with error object
+            self.progress_changed.emit(0)
+            self.processing_finished.emit(e)
+            return
+
+        self.progress_changed.emit(80)
+        # Emit signal when processing is completed
+        self.progress_changed.emit(100)
+        self.processing_finished.emit(self.adata)
+
+
+class MainWindow(QMainWindow):
+
     def __init__(self):
         super().__init__()
-
+        self.adata = None  # Holds the loaded data
+        self.progress_bar = None  # Progress bar for file loading
+        self.selected_metadata = 'cell_type_2'
+        self.font_settings = {"family": "Arial", "size": 15}  # Default font settings for plotly legend
         self.initUI()
 
     def initUI(self):
-        # 메인 레이아웃
-        main_layout = QVBoxLayout()
+        # Initialize the main UI layout and components
+        self.setup_menu_bar()
+        self.setup_status_bar()
+        self.setup_main_layout()
+        self.setWindowTitle('Merscope Visualizer')
+        self.setGeometry(100, 100, 1200, 800)
 
-        # Red, Green, Blue 그룹박스 추가
+    def setup_menu_bar(self):
+        # Setup the menu bar with 'File', 'Tool', and 'Font' menus
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu('&File')
+        open_action = QAction('File Open', self)
+        open_action.setShortcut('Ctrl+O')
+        open_action.triggered.connect(self.open_file)
+        file_menu.addAction(open_action)
+
+        tool_menu = menubar.addMenu('&Tool')
+        self.deg_action = QAction('DEG Analysis', self)
+        self.deg_action.setShortcut('Ctrl+A')
+        self.deg_action.triggered.connect(self.open_deg_analysis)
+        self.deg_action.setEnabled(False)
+        tool_menu.addAction(self.deg_action)
+
+        self.image_action = QAction('RGB Image', self)
+        self.image_action.setShortcut('Ctrl+I')
+        self.image_action.triggered.connect(self.open_image_merge_dialog)
+        tool_menu.addAction(self.image_action)
+
+        self.comparison_action = QAction('DEG other Samples', self)
+        self.comparison_action.setShortcut('Ctrl+P')
+        self.comparison_action.triggered.connect(self.comparison_other_samples_dialog)
+        self.comparison_action.setEnabled(False)
+        tool_menu.addAction(self.comparison_action)
+
+        # Add Font menu for changing font in Plotly plots and main layout
+        font_menu = menubar.addMenu('&Font')
+    
+        # Font for Main Layout
+        layout_font_action = QAction('Main Layout Font', self)
+        layout_font_action.triggered.connect(self.change_font_for_layout)
+        font_menu.addAction(layout_font_action)
+
+        # Font for Plotly
+        font_action = QAction('Main Plot Font', self)
+        font_action.triggered.connect(self.change_font_for_plot)
+        font_menu.addAction(font_action)
+
+    def setup_status_bar(self):
+        # Setup the status bar with a progress bar
+        self.statusbar = self.statusBar()
+        self.statusbar.showMessage('Ready')
+        self.progress_bar = QProgressBar(self)
+        self.statusbar.addPermanentWidget(self.progress_bar)
+        self.progress_bar.setValue(0)
+
+    def setup_main_layout(self):
+        # Setup the main layout of the window with a horizontal splitter
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        main_splitter = QSplitter(Qt.Horizontal)
+        self.central_widget.setLayout(QVBoxLayout())
+        self.central_widget.layout().addWidget(main_splitter)
+
+        self.setup_left_area(main_splitter)
+        self.setup_central_area(main_splitter)
+        
+        main_splitter.setSizes([100, 1100])
+
+    def setup_left_area(self, parent_splitter):
+        # Setup the left panel with spatial plot and gene list options
+        left_panel = QGroupBox()
+        left_layout = QGridLayout(left_panel)
+
+        # Add sections to the left layout
+        self.create_group_box('Spatial Plot', left_layout, 0, 0, 1, 2, self.create_spatial_plot_controls)
+        self.create_group_box('Genes', left_layout, 1, 0, 1, 2, self.create_genes_list)
+        self.create_group_box('Plotting', left_layout, 2, 0, 1, 2, self.create_plotting_controls)
+
+        parent_splitter.addWidget(left_panel)
+
+    def setup_central_area(self, parent_splitter):
+        # Setup the central area for displaying web views or plots
+        central_panel = QWidget()
+        self.central_layout = QVBoxLayout(central_panel)
+        self.web_view = QWebEngineView(self)
+        self.central_layout.addWidget(self.web_view)
+        parent_splitter.addWidget(central_panel)
+
+    def create_group_box(self, title, layout, row, col, rowspan, colspan, setup_func):
+        # Helper function to create a group box in the layout
+        group_box = QGroupBox(title)
+        group_layout = QGridLayout(group_box)
+        setup_func(group_layout)
+        layout.addWidget(group_box, row, col, rowspan, colspan)
+
+    def create_spatial_plot_controls(self, layout):
+        # Controls for spatial plot configuration
+        axis_label = QLabel('Axis :')
+        self.axis_input = QLineEdit('0')
+        layout.addWidget(axis_label, 0, 0)
+        layout.addWidget(self.axis_input, 0, 1)
+
+        start_button = QPushButton('Start')
+        start_button.clicked.connect(self.plot_spatial_scatter)
+        layout.addWidget(start_button, 1, 0, 1, 2)
+
+    def create_genes_list(self, layout):
+        # Text widget fot searching target gene
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setPlaceholderText("Enter the target gene")
+        self.search_bar.textChanged.connect(self.search_list)
+        layout.addWidget(self.search_bar, 0, 0, 1, 2)
+
+        # Gene list widget for selecting genes to analyze
+        self.genes_list_widget = QListWidget()
+        layout.addWidget(self.genes_list_widget, 1, 0, 1, 2)
+
+        # Adding a "Clear" button under the Genes list
+        clear_button = QPushButton('Clear')
+        clear_button.clicked.connect(self.clear_gene_selection)
+        layout.addWidget(clear_button, 2, 0, 1, 2)
+
+    def create_plotting_controls(self, layout):
+        # Plotting control options for different plot types
+        self.dot_plot_radio_button = QRadioButton('Dot plot')
+        self.violin_plot_radio_button = QRadioButton('Violin plot')
+        self.feature_plot_radio_button = QRadioButton('Feature plot')
+        self.scatter_plot_radio_button = QRadioButton('Scatter plot')
+
+        start_button = QPushButton('Start')
+        start_button.clicked.connect(self.plot_genes)
+
+        layout.addWidget(self.dot_plot_radio_button, 0, 0)
+        layout.addWidget(self.violin_plot_radio_button, 1, 0)
+        layout.addWidget(self.feature_plot_radio_button, 2, 0)
+        layout.addWidget(self.scatter_plot_radio_button, 3, 0)
+        layout.addWidget(start_button, 4, 0, 1, 2)
+    
+    def change_font_for_layout(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Apply the font to the entire layout
+            self.setFont(font)
+            self.update_layout_font(self.central_widget, font)
+            self.metadata_selector.setFont(font)
+    
+    def update_layout_font(self, widget, font):
+        # Recursively apply the font to all child widgets
+        widget.setFont(font)
+        for child in widget.findChildren(QWidget):
+            child.setFont(font)
+
+    def change_font_for_plot(self):
+        # Open QFontDialog to select font
+        font, ok = QFontDialog.getFont()
+        if ok:
+            # Update the font settings for plotly legend
+            self.font_settings["family"] = font.family()
+            self.font_settings["size"] = font.pointSize()
+            self.plot_spatial_scatter()
+
+    def open_file(self):
+        # Open file dialog to load an h5ad file
+        if self.adata is not None:
+            reply = QMessageBox.question(self, 'Warning', "Loading a new file will overwrite the existing data. Do you want to continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.No:
+                return
+
+        file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5);;All Files (*)")
+        if file_name:
+            self.current_file_path = file_name
+            self.start_data_processing(file_name)
+
+    def start_data_processing(self, file_name):
+        # Start the file loading and processing in a separate thread
+        self.progress_bar.setValue(0)
+        self.data_thread = DataProcessingThread(file_name)
+        self.data_thread.progress_changed.connect(self.update_progress)
+        self.data_thread.processing_finished.connect(self.on_data_loaded)
+        self.data_thread.start()
+
+    def update_progress(self, value):
+        # Update the progress bar with current progress value
+        self.progress_bar.setValue(value)
+
+    def on_data_loaded(self, result):
+        # Callback when data loading is finished
+        if isinstance(result, Exception):
+            QMessageBox.critical(self, "Error", f"Failed to load data: {str(result)}")
+        else:
+            self.adata = result
+            self.update_ui_after_data_loaded()
+
+    def update_ui_after_data_loaded(self):
+        # Update the UI after data is loaded successfully
+        self.all_genes = self.adata.var_names.to_list()
+        self.update_list(self.genes_list_widget, is_gene=True)
+        self.plot_spatial_scatter()
+        self.deg_action.setEnabled(True)
+        self.comparison_action.setEnabled(True)
+        self.progress_bar.setValue(100)
+        self.statusbar.showMessage("Data loaded successfully.")
+        self.setup_metadata_selector()
+    
+    def search_list(self):
+        search_text = self.search_bar.text().lower()
+
+        if not search_text:
+            self.update_list_with_checked_items(self.genes_list_widget, self.all_genes)
+            return
+
+        filtered_items = [item for item in self.all_genes if search_text in item.lower()]
+        self.update_list_with_checked_items(self.genes_list_widget, filtered_items)
+    
+    def update_list_with_checked_items(self, list_widget, items):
+        checked_items = {list_widget.item(i).text(): list_widget.item(i).checkState() for i in range(list_widget.count())}
+        
+        list_widget.clear()
+        for item in items:
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(checked_items.get(item, Qt.Unchecked))  # 이전 체크 상태를 유지
+            list_widget.addItem(list_item)
+
+    def update_list(self, list_widget, is_gene=False):
+        # Update the list widget with gene or cluster data
+        list_widget.clear()
+        items = sorted(self.adata.var_names.to_list()) if is_gene else sorted(self.adata.obs[self.selected_metadata].unique())
+        for item in items:
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(list_item)
+    
+    def clear_gene_selection(self):
+        for i in range(self.genes_list_widget.count()):
+            item = self.genes_list_widget.item(i)
+            item.setCheckState(Qt.Unchecked)
+    
+    def setup_metadata_selector(self):
+        if self.adata is None:
+            return
+        
+        if hasattr(self, 'metadata_selector'):
+            self.central_widget.layout().removeWidget(self.metadata_selector)
+            self.metadata_selector.deleteLater()
+            self.metadata_selector = None
+
+        metadata_layout = self.central_widget.layout()
+        self.metadata_selector = QComboBox(self)
+        self.metadata_selector.addItems(self.adata.obs.columns)
+        self.metadata_selector.currentTextChanged.connect(self.on_metadata_selected)
+        metadata_layout.insertWidget(0, self.metadata_selector)
+        self.metadata_selector.setFont(self.font())
+
+    def on_metadata_selected(self, selected_metadata):
+        self.selected_metadata = selected_metadata
+        self.plot_spatial_scatter()
+
+    def plot_spatial_scatter(self):
+        import gc
+        import plotly.graph_objects as go
+        # Plot the spatial scatter plot using Plotly
+        if self.adata is None:
+            return
+        
+        axis = self.get_rotation_axis()
+
+        try:
+            # Retrieve data for plotting
+            color_categories = self.adata.obs[self.selected_metadata].astype('category').cat.categories
+            color_uns = self.selected_metadata + "_colors"
+            color_map = {category: color for category, color in zip(color_categories, self.adata.uns[color_uns])}
+
+            cell_type_categories_sorted = sorted(self.adata.obs[self.selected_metadata].unique(), key=str)
+
+            rotated_x_coords, rotated_y_coords = self.rotate_coords(axis)
+            fig = go.Figure()
+
+            # Plot each category as a separate trace
+            for category in cell_type_categories_sorted:
+                mask = self.adata.obs[self.selected_metadata] == category
+                fig.add_trace(go.Scattergl(
+                    x=rotated_x_coords[mask], y=rotated_y_coords[mask],
+                    mode='markers', name=str(category),
+                    marker=dict(size=2, color=color_map[category])
+                ))
+
+            # Apply custom font to legend
+            fig.update_layout(
+                xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
+                yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
+                legend=dict(
+                    font=dict(family=self.font_settings["family"], size=self.font_settings["size"]),
+                    itemsizing="constant"
+                ),
+                plot_bgcolor="white", paper_bgcolor="white"
+            )
+
+            self.display_plot(fig)
+
+        except Exception as e:
+            QMessageBox.warning(self, 'Error', f'Could not plot data:\n{str(e)}')
+        finally:
+            gc.collect()
+    
+    def plot_genes(self):
+        # Plot selected genes using matplotlib
+        #from matplotlib.pyplot import subplots, colorbar, show
+        import gc
+
+        if self.adata is None:
+            return
+
+        selected_genes = [item.text() for item in self.genes_list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+        if not selected_genes:
+            QMessageBox.warning(self, "Warning", "Please select at least one gene.")
+            return
+
+        if self.scatter_plot_radio_button.isChecked():
+            axis = self.get_rotation_axis()
+            rotated_x_coords, rotated_y_coords = self.rotate_coords(axis)
+
+            num_genes = len(selected_genes)
+            rows, cols = (1, num_genes) if num_genes <= 4 else ((num_genes + 3) // 4, 4)
+
+            # Create subplots for multiple genes
+            fig, axs = matplotlib.pyplot.subplots(rows, cols, figsize=(cols * 5, rows * 5))
+            axs = axs.flat if num_genes > 1 else [axs]
+
+            # Plot each gene in a separate subplot
+            for i, gene in enumerate(selected_genes):
+                gene_expression = self.adata[:, gene].X.toarray().flatten()
+                ax = axs[i]
+                scatter = ax.scatter(x=rotated_x_coords, y=rotated_y_coords, c=gene_expression, cmap='Purples', s=0.1, edgecolors='none')
+                ax.set_title(gene)
+                ax.axis('off')
+                ax.set_aspect('equal', 'box')
+                matplotlib.pyplot.colorbar(scatter, ax=ax)
+
+            for j in range(i + 1, len(axs)):
+                fig.delaxes(axs[j])
+        else:
+            # Use Scanpy for other plot types (dot, violin, feature plot)
+            from scanpy import plotting as pl
+            if self.dot_plot_radio_button.isChecked():
+                pl.dotplot(self.adata, selected_genes, groupby=self.selected_metadata, categories_order=sorted(self.adata.obs[self.selected_metadata].unique()))
+            elif self.violin_plot_radio_button.isChecked():
+                pl.stacked_violin(self.adata, selected_genes, groupby=self.selected_metadata, categories_order=sorted(self.adata.obs[self.selected_metadata].unique()))
+            elif self.feature_plot_radio_button.isChecked():
+                selected_genes.append(self.selected_metadata)
+                pl.umap(self.adata, color=selected_genes, ncols=4)
+        matplotlib.pyplot.show()
+        gc.collect()
+
+    def get_rotation_axis(self):
+        # Get rotation axis for spatial scatter plot
+        num = float(self.axis_input.text())
+        return 180 / num if num > 0 else 360
+
+    def rotate_coords(self, axis):
+        # Rotate coordinates for spatial scatter plot
+        x_coords = self.adata.obsm['spatial'][:, 0]
+        y_coords = self.adata.obsm['spatial'][:, 1]
+        center_x = (x_coords.max() + x_coords.min()) / 2
+        center_y = (y_coords.max() + y_coords.min()) / 2
+
+        rotation_matrix = array([[cos(pi / axis), -sin(pi / axis)], [sin(pi / axis), cos(pi / axis)]])
+        rotated_coords = dot(vstack([x_coords - center_x, y_coords - center_y]).T, rotation_matrix)
+        return rotated_coords[:, 0] + center_x, rotated_coords[:, 1] + center_y
+
+    def display_plot(self, fig):
+        import tempfile
+        # Display the generated plot in the central web view
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as temp_file:
+            fig.write_html(temp_file.name)
+            self.web_view.setUrl(QUrl.fromLocalFile(temp_file.name))
+
+    def open_deg_analysis(self):
+        # Open the Differential Expression Gene (DEG) Analysis dialog
+        if self.adata is None:
+            QMessageBox.warning(self, 'Error', 'No data loaded to perform DEG analysis.')
+            return
+
+        dialog = DEGAnalysisDialog(self.adata, self.selected_metadata, self)
+        dialog.show()
+
+    def open_image_merge_dialog(self):
+        dialog = ImageMergeDialog(self)
+        dialog.show()
+    
+    def comparison_other_samples_dialog(self):
+        dialog = OtherSamplesDialog(self.adata, self.selected_metadata, self)
+        dialog.show()
+
+class DEGAnalysisDialog(QDialog):
+    def __init__(self, adata, selected_metadata, parent=None):
+        super().__init__(parent)
+        self.adata = adata
+        self.selected_metadata = selected_metadata
+        self.initUI()
+
+    def initUI(self):
+        # Initialize the UI for DEG Analysis
+        self.setWindowTitle('DEG Analysis')
+        self.setGeometry(200, 200, 600, 400)
+
+        layout = QVBoxLayout()
+        clusters_layout = QGridLayout()
+
+        self.clusters_list_widget = QListWidget()
+        self.other_clusters_list_widget = QListWidget()
+
+        # Create group boxes for clusters and other clusters selection
+        self.create_group_box('Clusters', clusters_layout, 0, 0, self.populate_clusters_list, self.clusters_list_widget)
+        self.create_group_box('Other Clusters', clusters_layout, 0, 1, self.populate_other_clusters_list, self.other_clusters_list_widget)
+
+        layout.addLayout(clusters_layout)
+        layout.addWidget(self.create_button('Clear', self.clear_selection))
+        layout.addWidget(self.create_button('Start', self.run_deg_analysis))
+        layout.addWidget(self.create_button('Save', self.save_deg_result))
+
+        # Sync the 'Clusters' and 'Other Clusters' list widget
+        self.clusters_list_widget.itemChanged.connect(self.sync_lists)
+        self.other_clusters_list_widget.itemChanged.connect(self.sync_lists)
+
+        self.setLayout(layout)
+
+    def create_group_box(self, title, layout, row, col, populate_func, list_widget):
+        # Create group box and populate it with clusters or other clusters
+        group_box = QGroupBox(title)
+        group_layout = QVBoxLayout(group_box)
+        populate_func(list_widget)
+        group_layout.addWidget(list_widget)
+        layout.addWidget(group_box, row, col)
+
+    def create_button(self, text, callback):
+        # Helper function to create buttons
+        button = QPushButton(text)
+        button.clicked.connect(callback)
+        return button
+
+    def populate_clusters_list(self, list_widget):
+        # Populate the clusters list with unique cluster values
+        self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
+
+    def populate_other_clusters_list(self, list_widget):
+        # Populate the other clusters list with unique cluster values
+        self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
+
+    def populate_list(self, list_widget, items):
+        # Helper function to populate a list widget with items
+        list_widget.clear()
+        for item in sorted(items):
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(list_item)
+    
+    def sync_lists(self, item):
+        self.clusters_list_widget.blockSignals(True)
+        self.other_clusters_list_widget.blockSignals(True)
+
+        if item.listWidget() == self.clusters_list_widget:
+            other_list = self.other_clusters_list_widget
+        else:
+            other_list = self.clusters_list_widget
+
+        for i in range(other_list.count()):
+            other_item = other_list.item(i)
+            if other_item.text() == item.text():
+                other_item.setFlags(other_item.flags() & ~Qt.ItemIsEnabled if item.checkState() == Qt.Checked else other_item.flags() | Qt.ItemIsEnabled)
+
+        self.clusters_list_widget.blockSignals(False)
+        self.other_clusters_list_widget.blockSignals(False)
+
+    def clear_selection(self):
+        # Clear the selection in both clusters and other clusters lists
+        self.clear_list(self.clusters_list_widget)
+        self.clear_list(self.other_clusters_list_widget)
+
+    def clear_list(self, list_widget):
+        # Clear the selection in a specific list widget
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            item.setCheckState(Qt.Unchecked)
+
+    def run_deg_analysis(self):     
+        # Run the Differential Expression Gene (DEG) analysis
+        selected_clusters = self.get_selected_items(self.clusters_list_widget)
+        selected_other_clusters = self.get_selected_items(self.other_clusters_list_widget)
+
+        if not selected_clusters or not selected_other_clusters:
+            QMessageBox.warning(self, "Warning", "Please select at least one cluster in both Clusters and Other Clusters.")
+            return
+
+        self.run_deg_analysis_logic(selected_clusters, selected_other_clusters)
+        QMessageBox.information(self, "Success", "DEG Analysis completed successfully.")
+
+    def run_deg_analysis_logic(self, selected_clusters, selected_other_clusters):
+        # Execute the actual DEG analysis logic using Scanpy
+        from scanpy import tools as tl
+        from scanpy import plotting as pl
+
+        merged_cluster_A = '_'.join(selected_clusters)
+        merged_cluster_B = '_'.join(selected_other_clusters)
+
+        self.adata.obs['cell_type_3'] = self.adata.obs[self.selected_metadata].astype(str)
+        self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_clusters)] = merged_cluster_A
+        self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_other_clusters)] = merged_cluster_B                        
+        self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
+
+        tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
+        pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
+
+    def get_selected_items(self, list_widget):
+        # Get selected items from the list widget
+        return [item.text() for item in list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+
+    def save_deg_result(self):
+        # Save the DEG analysis result to a CSV file
+        from pandas import DataFrame
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)")
+        if 'rank_genes_groups' in self.adata.uns:
+            result = self.adata.uns['rank_genes_groups']
+            groups = result['names'].dtype.names
+            result_df = DataFrame(
+                {group + '_' + key: result[key][group]
+                for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
+            )
+            if filePath:
+                if not filePath.endswith('.csv'):
+                    filePath += '.csv'
+                result_df.to_csv(filePath, index=False)
+                self.statusBar().showMessage(f"Data saved: {filePath}")
+        else:
+            QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
+
+class ImageMergeDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('RGB Image')
+        self.setGeometry(100, 100, 600, 300)
+
+        sub_layout = QVBoxLayout()
+
         self.red_group = self.create_group_box("Red")
         self.green_group = self.create_group_box("Green")
         self.blue_group = self.create_group_box("Blue")
-        self.blue_group.setEnabled(False)  # Blue는 처음에 비활성화
+        self.blue_group.setCheckable(True)
+        self.blue_group.setChecked(False)
 
-        # Blue 옆에 활성화 체크박스 추가
-        blue_check_layout = QHBoxLayout()
-        self.blue_checkbox = QCheckBox("Enable Blue", self)
-        self.blue_checkbox.stateChanged.connect(self.toggle_blue_group)
-        blue_check_layout.addWidget(self.blue_checkbox)
+        self.blue_group.toggled.connect(self.toggle_blue)
 
-        # 그룹박스와 체크박스를 메인 레이아웃에 추가
-        main_layout.addWidget(self.red_group)
-        main_layout.addWidget(self.green_group)
-        main_layout.addLayout(blue_check_layout)
-        main_layout.addWidget(self.blue_group)
+        sub_layout.addWidget(self.red_group)
+        sub_layout.addWidget(self.green_group)
+        sub_layout.addWidget(self.blue_group)
 
-        # Start 버튼 추가
-        self.start_button = QPushButton("Start", self)
-        self.start_button.clicked.connect(self.process_images)
-        main_layout.addWidget(self.start_button)
+        clear_button = QPushButton("Clear", self)
+        clear_button.clicked.connect(self.clear_file_paths)
 
-        # 중앙 위젯 설정
-        container = QWidget()
-        container.setLayout(main_layout)
-        self.setCentralWidget(container)
+        start_button = QPushButton("Start", self)
+        start_button.clicked.connect(self.process_images)
 
-        self.setWindowTitle("File Dialog Example")
-        self.setGeometry(100, 100, 400, 300)
+        sub_layout.addWidget(clear_button)
+        sub_layout.addWidget(start_button)
+
+        self.setLayout(sub_layout)
 
     def create_group_box(self, title):
-        # 그룹박스 생성
         group_box = QGroupBox(title)
 
-        # 그룹박스 내의 가로 레이아웃
         h_layout = QHBoxLayout()
 
-        # 파일 경로를 표시할 QTextBrowser (한 줄 크기로 설정)
         text_browser = QTextBrowser(self)
-        text_browser.setPlaceholderText(f"Selected {title} file path will be shown here")
-        text_browser.setFixedHeight(30)  # 한 줄 정도의 높이로 고정
+        text_browser.setPlaceholderText(f"Please select {title} file path")
+        text_browser.setFixedHeight(30)
 
-        # 파일 선택 버튼
-        button = QPushButton("button", self)
-        button.setFixedWidth(50)  # 버튼의 너비를 50으로 설정
+        button = QPushButton("...", self)
         button.clicked.connect(lambda: self.show_file_dialog(text_browser))
 
-        # 텍스트 브라우저와 버튼을 가로 레이아웃에 추가
         h_layout.addWidget(text_browser)
         h_layout.addWidget(button)
 
-        # 그룹박스에 가로 레이아웃 설정
         group_box.setLayout(h_layout)
 
-        # 그룹박스에 있는 텍스트 브라우저를 반환
         group_box.text_browser = text_browser
         return group_box
-
+    
     def show_file_dialog(self, text_browser):
-        # 파일 탐색기 열기, PNG 파일만 허용
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getOpenFileName(self, "Select PNG File", "", "PNG Files (*.png)", options=options)
 
         if file_path:
-            # 선택된 파일 경로를 QTextBrowser에 표시
             text_browser.setText(file_path)
 
-    def toggle_blue_group(self):
-        # Blue 그룹박스 활성화/비활성화
-        self.blue_group.setEnabled(self.blue_checkbox.isChecked())
+    def toggle_blue(self, checked):
+        if not checked:
+            self.blue_group.text_browser.clear()
+
+    def clear_file_paths(self):
+        self.red_group.text_browser.clear()
+        self.green_group.text_browser.clear()
+        self.blue_group.text_browser.clear()
 
     def process_images(self):
-        # 활성화된 그룹박스에서 선택된 파일을 가져옴
         red_file = self.red_group.text_browser.toPlainText()
         green_file = self.green_group.text_browser.toPlainText()
-        blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isEnabled() else None
+        blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
 
-        # 선택된 파일이 있는지 확인
         if not red_file or not green_file:
-            print("Red and Green files must be selected.")
+            QMessageBox.warning(self, "Warning", "Please select Red and Green files.")
             return
 
         if blue_file:
-            # Red, Green, Blue 이미지 처리 (3색 처리)
-            self.merge_images([red_file, green_file, blue_file], "merged_image_3colors.jpg")
+            self.merge_images([red_file, green_file, blue_file])
         else:
-            # Red, Green 이미지 처리 (2색 처리)
-            self.merge_images([red_file, green_file], "merged_image_2colors.jpg")
+            self.merge_images([red_file, green_file])
 
     def process_images_common(self, image_path):
-        """공통 이미지 처리: 이미지 로드, 흑백 변환 및 반전"""
         image = Image.open(image_path)
         bw_image = image.convert('L')
         inverted_image = ImageOps.invert(bw_image)
         return inverted_image.convert('RGB')
-
-    def save_channel_image(self, inverted_image, color, output_filename):
-        """각 채널별로 이미지를 저장하는 함수"""
+    
+    def channel_image(self, inverted_image, color):
         if color == 'red':
             red_channel = inverted_image.split()[0]
             green_channel = Image.new('L', inverted_image.size, 0)
             blue_channel = Image.new('L', inverted_image.size, 0)
         elif color == 'green':
-            red_channel = Image.new('L', inverted_image.size, 0)
             green_channel = inverted_image.split()[1]
+            red_channel = Image.new('L', inverted_image.size, 0)
             blue_channel = Image.new('L', inverted_image.size, 0)
         elif color == 'blue':
-            red_channel = Image.new('L', inverted_image.size, 0)
-            green_channel = Image.new('L', inverted_image.size, 0)
             blue_channel = inverted_image.split()[2]
-
+            green_channel = Image.new('L', inverted_image.size, 0)
+            red_channel = Image.new('L', inverted_image.size, 0)
+        
         channel_image = Image.merge('RGB', (red_channel, green_channel, blue_channel))
 
-        # 해상도를 10배로 확대
         new_size = (int(channel_image.width * 10), int(channel_image.height * 10))
         high_res_image = channel_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        # 고해상도로 저장
-        high_res_image.save(output_filename, quality=100)
-        print(f"{output_filename} saved successfully.")
+        high_res_image.show()
 
-    def merge_images(self, image_paths, output_filename):
-        """이미지를 병합하고 고해상도로 저장하는 함수"""
-        # 각 이미지를 채널로 변환
-        channels = [self.process_images_common(image_path).split()[i] for i, image_path in enumerate(image_paths)]
-        
-        # Blue 채널이 없으면 빈 채널 추가
-        if len(channels) == 2:
-            channels.append(Image.new('L', channels[0].size, 0))  # 빈 Blue 채널 추가
+    def merge_images(self, image_paths):
+        red_image = self.process_images_common(image_paths[0])
+        green_image = self.process_images_common(image_paths[1])
 
-        # 새로운 RGB 이미지 생성
+        if len(image_paths) == 3:
+            blue_image = self.process_images_common(image_paths[2])
+            channels = [red_image.split()[0], green_image.split()[1], blue_image.split()[2]]
+            self.channel_image(blue_image, 'blue')
+        else:
+            channels = [red_image.split()[0], green_image.split()[1], Image.new('L', red_image.size, 0)]
+
         merged_image = Image.merge('RGB', channels)
 
-        # Red, Green, Blue 각각의 이미지를 저장
-        self.save_channel_image(self.process_images_common(image_paths[0]), 'red', 'red_image.jpg')
-        self.save_channel_image(self.process_images_common(image_paths[1]), 'green', 'green_image.jpg')
-        if len(image_paths) == 3:
-            self.save_channel_image(self.process_images_common(image_paths[2]), 'blue', 'blue_image.jpg')
+        self.channel_image(red_image, 'red')
+        self.channel_image(green_image, 'green')
 
-        # 병합된 이미지를 고해상도로 저장
         new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
         high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
-        high_res_image.save(output_filename, quality=100)
-        print(f"{output_filename} saved successfully.")
+        high_res_image.show()
 
+class OtherSamplesDialog(QDialog):
+    def __init__(self, adata, selected_metadata, parent=None):
+        super().__init__(parent)
+        self.adata = adata  # 메인 윈도우에서 로드한 파일
+        self.selected_metadata = selected_metadata
+        self.sample_files = [None]  # Sample1 파일을 포함한 파일 리스트
+        self.sample_data = {0: adata}  # 각 샘플의 로드된 데이터를 저장
+        self.initUI()
+
+    def initUI(self):
+        self.setWindowTitle('DEG Other Samples')
+        self.setGeometry(100, 100, 800, 600)
+
+        self.main_layout = QVBoxLayout(self)
+
+        # Combobox와 Select 버튼
+        self.label = QLabel("Select the number of Samples:")
+        self.combo_box = QComboBox(self)
+        self.combo_box.addItems([str(i) for i in range(2, 7)])  # 2~6까지 선택 가능
+        self.select_button = QPushButton("Select", self)
+        self.select_button.clicked.connect(self.create_sample_inputs)
+
+        combo_layout = QHBoxLayout()
+        combo_layout.addWidget(self.label)
+        combo_layout.addWidget(self.combo_box)
+        combo_layout.addWidget(self.select_button)
+
+        self.main_layout.addLayout(combo_layout)
+
+        # Sample1 경로 출력 (메인 윈도우에서 로드한 파일)
+        self.sample1_label = QLabel(f"Sample1: {self.parent().current_file_path}")
+        self.main_layout.addWidget(self.sample1_label)
+
+        # 추가 기능을 위한 파일 경로 선택 및 그룹박스 동적 생성
+        self.sample_input_layout = QVBoxLayout()
+        self.main_layout.addLayout(self.sample_input_layout)
+
+        # Sample1에 대한 그룹박스 생성 (메인 윈도우에서 로드된 클러스터 리스트)
+        self.show_clusters_button = QPushButton("Show the Clusters list of Samples", self)
+        self.show_clusters_button.clicked.connect(self.show_clusters_for_all_samples)
+        self.main_layout.addWidget(self.show_clusters_button)
+
+        self.sample_groupbox_layout = QHBoxLayout()
+        self.sample1_groupbox = self.create_sample_groupbox(self.adata)
+        self.sample_groupbox_layout.addWidget(self.sample1_groupbox)
+        self.main_layout.addLayout(self.sample_groupbox_layout)
+
+        # Clear, Start, Save 버튼 추가
+        self.clear_button = QPushButton("Clear", self)
+        self.clear_button.clicked.connect(self.clear_all_selection)
+        self.main_layout.addWidget(self.clear_button)
+
+        self.start_button = QPushButton("Start", self)
+        self.start_button.clicked.connect(self.compare_gene_expression)
+        self.main_layout.addWidget(self.start_button)
+
+        self.save_button = QPushButton("Save", self)
+        self.main_layout.addWidget(self.save_button)
+
+    def create_sample_inputs(self):
+        # Combobox에서 선택한 숫자만큼의 Sample 입력 UI 생성
+        num_samples = int(self.combo_box.currentText())
+
+        # 기존에 생성된 위젯 제거 (파일 경로와 그룹박스 모두)
+        for i in reversed(range(self.sample_input_layout.count())):
+            item = self.sample_input_layout.itemAt(i)
+            if item is not None and item.layout() is not None:
+                # 파일 경로 입력 관련 레이아웃을 삭제
+                for j in reversed(range(item.layout().count())):
+                    sub_item = item.layout().itemAt(j)
+                    if sub_item is not None and sub_item.widget() is not None:
+                        sub_item.widget().deleteLater()
+                item.layout().deleteLater()
+
+        for i in reversed(range(self.sample_groupbox_layout.count())):
+            if i == 0:
+                continue  # Sample1 그룹박스는 남김
+            item = self.sample_groupbox_layout.itemAt(i)
+            if item is not None and item.widget() is not None:
+                item.widget().deleteLater()
+
+        self.sample_files = [None] * num_samples  # Sample1 포함한 리스트 초기화
+
+        # Sample2 이후의 파일 선택 UI 생성
+        for sample_idx in range(2, num_samples + 1):
+            file_label = QLabel(f"Sample{sample_idx}:")
+            file_browser = QTextBrowser(self)
+            file_browser.setFixedHeight(20)
+            file_button = QPushButton("File", self)
+            file_button.clicked.connect(lambda _, idx=sample_idx-1, browser=file_browser: self.select_file(idx, browser))
+
+            file_layout = QHBoxLayout()
+            file_layout.addWidget(file_label)
+            file_layout.addWidget(file_browser)
+            file_layout.addWidget(file_button)
+
+            self.sample_input_layout.addLayout(file_layout)
+
+            # 그룹박스를 수평으로 추가
+            groupbox = QGroupBox(f"Sample{sample_idx} Clusters")
+            layout = QVBoxLayout(groupbox)
+            list_widget = QListWidget()  # 빈 리스트 박스, 이후에 파일 로드 시 채워짐
+            layout.addWidget(list_widget)
+            self.sample_groupbox_layout.addWidget(groupbox)
+
+    def select_file(self, idx, browser):
+        # 파일 선택 다이얼로그 표시 및 파일 경로를 브라우저에 출력
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5)")
+        if file_path:
+            browser.setText(file_path)
+            self.sample_files[idx] = file_path
+
+    def show_clusters_for_all_samples(self):
+        from scanpy import read_h5ad
+        # Sample1과 Sample2 이후의 파일에 대해 클러스터 리스트를 표시
+        for idx, file_path in enumerate(self.sample_files):
+            if idx == 0:  # Sample1은 메인 윈도우에서 로드한 데이터
+                adata = self.adata
+            else:
+                # 로컬 파일을 로드하여 데이터를 저장
+                try:
+                    adata = read_h5ad(file_path)
+                    self.sample_data[idx] = adata
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
+                    continue
+
+            # 해당하는 그룹박스에 클러스터 리스트를 추가
+            groupbox_layout = self.sample_groupbox_layout.itemAt(idx).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()  # QListWidget 가져오기
+            self.update_sample_groupbox(list_widget, adata)
+
+    def create_sample_groupbox(self, adata):
+        # 각 샘플의 그룹박스를 생성하고 클러스터 리스트를 표시
+        group_box = QGroupBox("Sample1 Clusters")
+        layout = QVBoxLayout(group_box)
+
+        cluster_list_widget = QListWidget()
+        clusters = sorted(adata.obs[self.selected_metadata].unique())
+        for cluster in clusters:
+            item = QListWidgetItem(cluster)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            cluster_list_widget.addItem(item)
+
+        layout.addWidget(cluster_list_widget)
+        return group_box
+
+    def update_sample_groupbox(self, list_widget, adata):
+        # 그룹박스의 클러스터 리스트를 업데이트
+        list_widget.clear()
+        clusters = sorted(adata.obs[self.selected_metadata].unique())
+        for cluster in clusters:
+            item = QListWidgetItem(cluster)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(item)
+
+    def clear_all_selection(self):
+        # 모든 리스트에서 선택을 해제
+        for i in range(self.sample_groupbox_layout.count()):
+            groupbox_layout = self.sample_groupbox_layout.itemAt(i).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()  # QListWidget 가져오기
+            for j in range(list_widget.count()):
+                list_widget.item(j).setCheckState(Qt.Unchecked)
+
+    def compare_gene_expression(self):
+        import anndata
+        from scanpy import tools as tl
+        # 각 샘플에서 선택된 클러스터를 추출하여 병합하고 비교
+        combined_adata_list = []
+        sample_names = []
+
+        for idx, adata in self.sample_data.items():
+            # 선택된 클러스터 추출
+            groupbox_layout = self.sample_groupbox_layout.itemAt(idx).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()  # QListWidget 가져오기
+
+            selected_clusters = []
+            for j in range(list_widget.count()):
+                item = list_widget.item(j)
+                if item.checkState() == Qt.Checked:
+                    selected_clusters.append(item.text())
+
+            if not selected_clusters:
+                continue
+
+            # 선택된 클러스터로 서브셋 추출
+            adata_sub = adata[adata.obs[self.selected_metadata].isin(selected_clusters)].copy()
+
+            # 샘플 이름 설정
+            adata_sub.obs_names = [f"sample{idx+1}_{i}" for i in adata_sub.obs_names]
+            combined_adata_list.append(adata_sub)
+            sample_names.append(f"sample{idx+1}")
+
+        if not combined_adata_list:
+            QMessageBox.warning(self, "Warning", "No clusters selected for comparison.")
+            return
+
+        # 데이터 병합
+        combined_adata = anndata.concat(combined_adata_list, label="sample", keys=sample_names, join="outer")
+
+        # 유전자 발현 비교
+        tl.rank_genes_groups(combined_adata, groupby='sample', method='wilcoxon')
+
+        
 if __name__ == '__main__':
+    from multiprocessing import freeze_support
+    freeze_support()
+
     app = QApplication(sys.argv)
-    ex = FileDialogDemo()
-    ex.show()
+    main_window = MainWindow()
+    main_window.show()
     sys.exit(app.exec_())
