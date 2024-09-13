@@ -590,12 +590,13 @@ class ImageMergeDialog(QDialog):
     # Dialog for merging RGB images
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.save_directory = None  # Initialize save directory
         self.initUI()
 
     def initUI(self):
         # Initialize UI for image merge dialog
         self.setWindowTitle('RGB Image')
-        self.setGeometry(50, 50, 600, 200)
+        self.setGeometry(50, 50, 700, 300)
 
         sub_layout = QVBoxLayout()
 
@@ -611,12 +612,17 @@ class ImageMergeDialog(QDialog):
         sub_layout.addWidget(self.green_group)
         sub_layout.addWidget(self.blue_group)
 
+        # Save folder group box
+        self.save_group_box = self.create_save_group_box("Save Folder")
+
+        # Buttons
         clear_button = QPushButton("Clear", self)
         clear_button.clicked.connect(self.clear_file_paths)
 
         start_button = QPushButton("Start", self)
         start_button.clicked.connect(self.process_images)
 
+        sub_layout.addWidget(self.save_group_box)  # Add the save folder group box
         sub_layout.addWidget(clear_button)
         sub_layout.addWidget(start_button)
 
@@ -642,7 +648,28 @@ class ImageMergeDialog(QDialog):
 
         group_box.text_browser = text_browser
         return group_box
-    
+
+    def create_save_group_box(self, title):
+        # Create a group box for selecting save folder and displaying path
+        group_box = QGroupBox(title)
+
+        h_layout = QHBoxLayout()
+
+        # Text browser to display selected save folder path
+        self.save_folder_browser = QTextBrowser(self)
+        self.save_folder_browser.setPlaceholderText("Selected save folder will be displayed here")
+        self.save_folder_browser.setFixedHeight(30)
+
+        # Button to open file dialog to select folder
+        select_folder_button = QPushButton("Select Save Folder", self)
+        select_folder_button.clicked.connect(self.select_save_directory)
+
+        h_layout.addWidget(self.save_folder_browser)
+        h_layout.addWidget(select_folder_button)
+
+        group_box.setLayout(h_layout)
+        return group_box
+
     def show_file_dialog(self, text_browser):
         # Show file dialog to select image files
         options = QFileDialog.Options()
@@ -650,6 +677,13 @@ class ImageMergeDialog(QDialog):
 
         if file_path:
             text_browser.setText(file_path)
+
+    def select_save_directory(self):
+        # Open a dialog to select the directory where images will be saved
+        self.save_directory = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+        if self.save_directory:
+            # Display the selected folder path in the text browser
+            self.save_folder_browser.setText(self.save_directory)
 
     def toggle_blue(self, checked):
         # Toggle the blue channel selection
@@ -664,6 +698,10 @@ class ImageMergeDialog(QDialog):
 
     def process_images(self):
         # Process and merge selected images
+        if not self.save_directory:
+            QMessageBox.warning(self, "Warning", "Please select a folder to save the images.")
+            return
+
         red_file = self.red_group.text_browser.toPlainText()
         green_file = self.green_group.text_browser.toPlainText()
         blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
@@ -683,28 +721,25 @@ class ImageMergeDialog(QDialog):
         bw_image = image.convert('L')
         inverted_image = ImageOps.invert(bw_image)
         return inverted_image.convert('RGB')
-    
+
     def channel_image(self, inverted_image, color):
         # Extract the selected color channel from the image
+        red_channel = green_channel = blue_channel = Image.new('L', inverted_image.size, 0)
+
         if color == 'red':
             red_channel = inverted_image.split()[0]
-            green_channel = Image.new('L', inverted_image.size, 0)
-            blue_channel = Image.new('L', inverted_image.size, 0)
         elif color == 'green':
             green_channel = inverted_image.split()[1]
-            red_channel = Image.new('L', inverted_image.size, 0)
-            blue_channel = Image.new('L', inverted_image.size, 0)
         elif color == 'blue':
             blue_channel = inverted_image.split()[2]
-            green_channel = Image.new('L', inverted_image.size, 0)
-            red_channel = Image.new('L', inverted_image.size, 0)
         
         channel_image = Image.merge('RGB', (red_channel, green_channel, blue_channel))
 
         new_size = (int(channel_image.width * 10), int(channel_image.height * 10))
         high_res_image = channel_image.resize(new_size, Image.Resampling.LANCZOS)
 
-        high_res_image.show()
+        if self.save_directory:
+            high_res_image.save(f'{self.save_directory}/{color}_image.jpg', quality=100)
 
     def merge_images(self, image_paths):
         # Merge red, green, and optionally blue images into an RGB image
@@ -725,7 +760,12 @@ class ImageMergeDialog(QDialog):
 
         new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
         high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
-        high_res_image.show()
+        
+        if self.save_directory:
+            high_res_image.save(f'{self.save_directory}/merged_image.png', quality=100)
+
+        QMessageBox.information(self, "Success", f"Images saved in {self.save_directory}")
+
 
 class OtherSamplesDialog(QDialog):
     # Dialog for comparing DEG across multiple samples
