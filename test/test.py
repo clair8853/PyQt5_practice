@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QH
                              QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
                              QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog,
-                             QTextBrowser, QComboBox)
+                             QTextBrowser, QComboBox, QStatusBar)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PIL import Image, ImageOps
 from numpy import array, cos, sin, dot, vstack, pi
@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         self.setup_status_bar()
         self.setup_main_layout()
         self.setWindowTitle('Merscope Visualizer')
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1600, 1000)
 
     def setup_menu_bar(self):
         # Setup the menu bar with 'File', 'Tool', and 'Font' menus
@@ -569,6 +569,8 @@ class DEGAnalysisDialog(QDialog):
 
         tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
         pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
+        self.raise_()
+        self.activateWindow()
 
     def get_selected_items(self, list_widget):
         # Get selected items from the list widget
@@ -589,7 +591,9 @@ class DEGAnalysisDialog(QDialog):
                 if not filePath.endswith('.csv'):
                     filePath += '.csv'
                 result_df.to_csv(filePath, index=False)
-                self.statusBar().showMessage(f"Data saved: {filePath}")
+                QMessageBox.information(self, "Success", f"Data saved: {filePath}")
+            self.raise_()
+            self.activateWindow()
         else:
             QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
 
@@ -724,6 +728,9 @@ class ImageMergeDialog(QDialog):
         high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
         high_res_image.show()
 
+        self.raise_()
+        self.activateWindow()
+
 class OtherSamplesDialog(QDialog):
     def __init__(self, adata, selected_metadata, parent=None):
         super().__init__(parent)
@@ -735,7 +742,7 @@ class OtherSamplesDialog(QDialog):
 
     def initUI(self):
         self.setWindowTitle('DEG Other Samples')
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(300, 100, 1000, 800)
 
         self.main_layout = QVBoxLayout(self)
 
@@ -781,6 +788,7 @@ class OtherSamplesDialog(QDialog):
         self.main_layout.addWidget(self.start_button)
 
         self.save_button = QPushButton("Save", self)
+        self.save_button.clicked.connect(self.save_file)
         self.main_layout.addWidget(self.save_button)
 
     def create_sample_inputs(self):
@@ -893,6 +901,7 @@ class OtherSamplesDialog(QDialog):
     def compare_gene_expression(self):
         import anndata
         from scanpy import tools as tl
+        from scanpy import plotting as pl
         # 각 샘플에서 선택된 클러스터를 추출하여 병합하고 비교
         combined_adata_list = []
         sample_names = []
@@ -924,10 +933,38 @@ class OtherSamplesDialog(QDialog):
             return
 
         # 데이터 병합
-        combined_adata = anndata.concat(combined_adata_list, label="sample", keys=sample_names, join="outer")
+        self.combined_adata = anndata.concat(combined_adata_list, label="sample", keys=sample_names, join="outer")
 
         # 유전자 발현 비교
-        tl.rank_genes_groups(combined_adata, groupby='sample', method='wilcoxon')
+        tl.rank_genes_groups(self.combined_adata, groupby='sample', method='wilcoxon')
+        pl.rank_genes_groups(self.combined_adata, n_genes=25, sharey=False)
+        self.raise_()
+        self.activateWindow()
+    
+    def save_file(self):
+        # Save the DEG analysis result to a CSV file
+        from pandas import DataFrame
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)")
+        
+        if not filePath:
+            return
+
+        if 'rank_genes_groups' in self.combined_adata.uns:
+            result = self.combined_adata.uns['rank_genes_groups']
+            groups = result['names'].dtype.names
+            result_df = DataFrame(
+                {group + '_' + key: result[key][group]
+                for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
+            )
+            if not filePath.endswith('.csv'):
+                filePath += '.csv'
+            result_df.to_csv(filePath, index=False)
+            QMessageBox.information(self, "Success", f"Data saved: {filePath}")
+
+            self.raise_()
+            self.activateWindow()
+        else:
+            QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
 
         
 if __name__ == '__main__':
