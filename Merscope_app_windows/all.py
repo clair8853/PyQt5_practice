@@ -6,16 +6,16 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QH
                              QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
                              QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog,
-                             QTextBrowser, QComboBox)
+                             QTextBrowser, QComboBox, QStatusBar)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PIL import Image, ImageOps
 from numpy import array, cos, sin, dot, vstack, pi
 
 
 class DataProcessingThread(QThread):
-    # Signal for progress update and processing finish
-    progress_changed = pyqtSignal(int)
-    processing_finished = pyqtSignal(object)
+    # Thread for loading and processing data in the background
+    progress_changed = pyqtSignal(int)  # Signal to update progress bar
+    processing_finished = pyqtSignal(object)  # Signal emitted when processing is done
 
     def __init__(self, file_name, parent=None):
         super().__init__(parent)
@@ -23,45 +23,44 @@ class DataProcessingThread(QThread):
         self.adata = None
 
     def run(self):
+        # Method that runs the data loading
         from scanpy import read_h5ad
-        # Emit signal for the start of file loading
-        self.progress_changed.emit(10)
+        self.progress_changed.emit(10)  # Initial progress update
         try:
             # Load the file and update progress
             self.adata = read_h5ad(self.file_name)
             self.progress_changed.emit(50)
         except Exception as e:
-            # In case of an error, emit signal with error object
+            # Emit error signal if loading fails
             self.progress_changed.emit(0)
             self.processing_finished.emit(e)
             return
-
         self.progress_changed.emit(80)
-        # Emit signal when processing is completed
         self.progress_changed.emit(100)
         self.processing_finished.emit(self.adata)
 
 
 class MainWindow(QMainWindow):
+    # Main application window
 
     def __init__(self):
         super().__init__()
-        self.adata = None  # Holds the loaded data
-        self.progress_bar = None  # Progress bar for file loading
+        self.adata = None  # Loaded data
+        self.progress_bar = None  # Progress bar for loading
         self.selected_metadata = 'cell_type_2'
-        self.font_settings = {"family": "Arial", "size": 15}  # Default font settings for plotly legend
+        self.font_settings = {"family": "Arial", "size": 15}  # Default font for plots
         self.initUI()
 
     def initUI(self):
-        # Initialize the main UI layout and components
+        # Initialize UI components
         self.setup_menu_bar()
         self.setup_status_bar()
         self.setup_main_layout()
         self.setWindowTitle('Merscope Visualizer')
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1600, 900)
 
     def setup_menu_bar(self):
-        # Setup the menu bar with 'File', 'Tool', and 'Font' menus
+        # Setup the menu bar
         menubar = self.menuBar()
         file_menu = menubar.addMenu('&File')
         open_action = QAction('File Open', self)
@@ -78,18 +77,21 @@ class MainWindow(QMainWindow):
 
         self.image_action = QAction('RGB Image', self)
         self.image_action.setShortcut('Ctrl+I')
-        self.image_action.triggered.connect(self.open_image_merge)
+        self.image_action.triggered.connect(self.open_image_merge_dialog)
         tool_menu.addAction(self.image_action)
 
-        # Add Font menu for changing font in Plotly plots and main layout
+        self.comparison_action = QAction('DEG other Samples', self)
+        self.comparison_action.setShortcut('Ctrl+P')
+        self.comparison_action.triggered.connect(self.comparison_other_samples_dialog)
+        self.comparison_action.setEnabled(False)
+        tool_menu.addAction(self.comparison_action)
+
         font_menu = menubar.addMenu('&Font')
-    
-        # Font for Main Layout
+
         layout_font_action = QAction('Main Layout Font', self)
         layout_font_action.triggered.connect(self.change_font_for_layout)
         font_menu.addAction(layout_font_action)
 
-        # Font for Plotly
         font_action = QAction('Main Plot Font', self)
         font_action.triggered.connect(self.change_font_for_plot)
         font_menu.addAction(font_action)
@@ -103,7 +105,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
 
     def setup_main_layout(self):
-        # Setup the main layout of the window with a horizontal splitter
+        # Setup the main layout of the window
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
 
@@ -114,14 +116,13 @@ class MainWindow(QMainWindow):
         self.setup_left_area(main_splitter)
         self.setup_central_area(main_splitter)
         
-        main_splitter.setSizes([100, 1100])
+        main_splitter.setSizes([200, 1600])
 
     def setup_left_area(self, parent_splitter):
-        # Setup the left panel with spatial plot and gene list options
+        # Setup the left panel with controls for plotting
         left_panel = QGroupBox()
         left_layout = QGridLayout(left_panel)
 
-        # Add sections to the left layout
         self.create_group_box('Spatial Plot', left_layout, 0, 0, 1, 2, self.create_spatial_plot_controls)
         self.create_group_box('Genes', left_layout, 1, 0, 1, 2, self.create_genes_list)
         self.create_group_box('Plotting', left_layout, 2, 0, 1, 2, self.create_plotting_controls)
@@ -129,7 +130,7 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(left_panel)
 
     def setup_central_area(self, parent_splitter):
-        # Setup the central area for displaying web views or plots
+        # Setup the central area to display plots or web views
         central_panel = QWidget()
         self.central_layout = QVBoxLayout(central_panel)
         self.web_view = QWebEngineView(self)
@@ -137,14 +138,14 @@ class MainWindow(QMainWindow):
         parent_splitter.addWidget(central_panel)
 
     def create_group_box(self, title, layout, row, col, rowspan, colspan, setup_func):
-        # Helper function to create a group box in the layout
+        # Create group boxes for UI sections
         group_box = QGroupBox(title)
         group_layout = QGridLayout(group_box)
         setup_func(group_layout)
         layout.addWidget(group_box, row, col, rowspan, colspan)
 
     def create_spatial_plot_controls(self, layout):
-        # Controls for spatial plot configuration
+        # Create controls for spatial plot options
         axis_label = QLabel('Axis :')
         self.axis_input = QLineEdit('0')
         layout.addWidget(axis_label, 0, 0)
@@ -155,17 +156,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(start_button, 1, 0, 1, 2)
 
     def create_genes_list(self, layout):
-        # Gene list widget for selecting genes to analyze
-        self.genes_list_widget = QListWidget()
-        layout.addWidget(self.genes_list_widget, 0, 0, 1, 2)
+        # Create gene list for selection
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setPlaceholderText("Enter the target gene")
+        self.search_bar.textChanged.connect(self.search_list)
+        layout.addWidget(self.search_bar, 0, 0, 1, 2)
 
-        # Adding a "Clear" button under the Genes list
+        self.genes_list_widget = QListWidget()
+        layout.addWidget(self.genes_list_widget, 1, 0, 1, 2)
+
         clear_button = QPushButton('Clear')
         clear_button.clicked.connect(self.clear_gene_selection)
-        layout.addWidget(clear_button, 1, 0, 1, 2)
+        layout.addWidget(clear_button, 2, 0, 1, 2)
 
     def create_plotting_controls(self, layout):
-        # Plotting control options for different plot types
+        # Create controls for selecting plot types
         self.dot_plot_radio_button = QRadioButton('Dot plot')
         self.violin_plot_radio_button = QRadioButton('Violin plot')
         self.feature_plot_radio_button = QRadioButton('Feature plot')
@@ -181,31 +186,29 @@ class MainWindow(QMainWindow):
         layout.addWidget(start_button, 4, 0, 1, 2)
     
     def change_font_for_layout(self):
-        # Open QFontDialog to select font
+        # Open dialog to change font for the layout
         font, ok = QFontDialog.getFont()
         if ok:
-            # Apply the font to the entire layout
             self.setFont(font)
             self.update_layout_font(self.central_widget, font)
             self.metadata_selector.setFont(font)
     
     def update_layout_font(self, widget, font):
-        # Recursively apply the font to all child widgets
+        # Apply the selected font to all layout widgets
         widget.setFont(font)
         for child in widget.findChildren(QWidget):
             child.setFont(font)
 
     def change_font_for_plot(self):
-        # Open QFontDialog to select font
+        # Open dialog to change font for plot legends
         font, ok = QFontDialog.getFont()
         if ok:
-            # Update the font settings for plotly legend
             self.font_settings["family"] = font.family()
             self.font_settings["size"] = font.pointSize()
             self.plot_spatial_scatter()
 
     def open_file(self):
-        # Open file dialog to load an h5ad file
+        # Open file dialog to load a new file
         if self.adata is not None:
             reply = QMessageBox.question(self, 'Warning', "Loading a new file will overwrite the existing data. Do you want to continue?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.No:
@@ -213,10 +216,11 @@ class MainWindow(QMainWindow):
 
         file_name, _ = QFileDialog.getOpenFileName(self, "Open HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5);;All Files (*)")
         if file_name:
+            self.current_file_path = file_name
             self.start_data_processing(file_name)
 
     def start_data_processing(self, file_name):
-        # Start the file loading and processing in a separate thread
+        # Start processing the file in a separate thread
         self.progress_bar.setValue(0)
         self.data_thread = DataProcessingThread(file_name)
         self.data_thread.progress_changed.connect(self.update_progress)
@@ -224,11 +228,11 @@ class MainWindow(QMainWindow):
         self.data_thread.start()
 
     def update_progress(self, value):
-        # Update the progress bar with current progress value
+        # Update the progress bar with current value
         self.progress_bar.setValue(value)
 
     def on_data_loaded(self, result):
-        # Callback when data loading is finished
+        # Handle data after it is loaded
         if isinstance(result, Exception):
             QMessageBox.critical(self, "Error", f"Failed to load data: {str(result)}")
         else:
@@ -236,16 +240,40 @@ class MainWindow(QMainWindow):
             self.update_ui_after_data_loaded()
 
     def update_ui_after_data_loaded(self):
-        # Update the UI after data is loaded successfully
+        # Update the UI after data is successfully loaded
+        self.all_genes = self.adata.var_names.to_list()
         self.update_list(self.genes_list_widget, is_gene=True)
         self.plot_spatial_scatter()
         self.deg_action.setEnabled(True)
+        self.comparison_action.setEnabled(True)
         self.progress_bar.setValue(100)
         self.statusbar.showMessage("Data loaded successfully.")
         self.setup_metadata_selector()
+    
+    def search_list(self):
+        # Filter genes in the list based on search input
+        search_text = self.search_bar.text().lower()
+
+        if not search_text:
+            self.update_list_with_checked_items(self.genes_list_widget, self.all_genes)
+            return
+
+        filtered_items = [item for item in self.all_genes if search_text in item.lower()]
+        self.update_list_with_checked_items(self.genes_list_widget, filtered_items)
+    
+    def update_list_with_checked_items(self, list_widget, items):
+        # Update list widget with checked items
+        checked_items = {list_widget.item(i).text(): list_widget.item(i).checkState() for i in range(list_widget.count())}
+        
+        list_widget.clear()
+        for item in items:
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(checked_items.get(item, Qt.Unchecked))
+            list_widget.addItem(list_item)
 
     def update_list(self, list_widget, is_gene=False):
-        # Update the list widget with gene or cluster data
+        # Update gene or cluster list in the widget
         list_widget.clear()
         items = sorted(self.adata.var_names.to_list()) if is_gene else sorted(self.adata.obs[self.selected_metadata].unique())
         for item in items:
@@ -255,13 +283,20 @@ class MainWindow(QMainWindow):
             list_widget.addItem(list_item)
     
     def clear_gene_selection(self):
+        # Clear all selected genes in the list
         for i in range(self.genes_list_widget.count()):
             item = self.genes_list_widget.item(i)
             item.setCheckState(Qt.Unchecked)
     
     def setup_metadata_selector(self):
+        # Setup a dropdown to select metadata for plotting
         if self.adata is None:
             return
+        
+        if hasattr(self, 'metadata_selector'):
+            self.central_widget.layout().removeWidget(self.metadata_selector)
+            self.metadata_selector.deleteLater()
+            self.metadata_selector = None
 
         metadata_layout = self.central_widget.layout()
         self.metadata_selector = QComboBox(self)
@@ -271,21 +306,20 @@ class MainWindow(QMainWindow):
         self.metadata_selector.setFont(self.font())
 
     def on_metadata_selected(self, selected_metadata):
+        # Handle metadata selection changes
         self.selected_metadata = selected_metadata
         self.plot_spatial_scatter()
 
-
     def plot_spatial_scatter(self):
+        # Plot spatial scatter plot using Plotly
         import gc
         import plotly.graph_objects as go
-        # Plot the spatial scatter plot using Plotly
         if self.adata is None:
             return
         
         axis = self.get_rotation_axis()
 
         try:
-            # Retrieve data for plotting
             color_categories = self.adata.obs[self.selected_metadata].astype('category').cat.categories
             color_uns = self.selected_metadata + "_colors"
             color_map = {category: color for category, color in zip(color_categories, self.adata.uns[color_uns])}
@@ -295,7 +329,6 @@ class MainWindow(QMainWindow):
             rotated_x_coords, rotated_y_coords = self.rotate_coords(axis)
             fig = go.Figure()
 
-            # Plot each category as a separate trace
             for category in cell_type_categories_sorted:
                 mask = self.adata.obs[self.selected_metadata] == category
                 fig.add_trace(go.Scattergl(
@@ -304,7 +337,6 @@ class MainWindow(QMainWindow):
                     marker=dict(size=2, color=color_map[category])
                 ))
 
-            # Apply custom font to legend
             fig.update_layout(
                 xaxis=dict(scaleanchor="y", scaleratio=1, range=[rotated_x_coords.min(), rotated_x_coords.max()], showticklabels=False),
                 yaxis=dict(scaleanchor="x", scaleratio=1, range=[rotated_y_coords.min(), rotated_y_coords.max()], showticklabels=False),
@@ -323,8 +355,7 @@ class MainWindow(QMainWindow):
             gc.collect()
     
     def plot_genes(self):
-        # Plot selected genes using matplotlib
-        #from matplotlib.pyplot import subplots, colorbar, show
+        # Plot selected genes using Matplotlib or Scanpy
         import gc
 
         if self.adata is None:
@@ -342,11 +373,9 @@ class MainWindow(QMainWindow):
             num_genes = len(selected_genes)
             rows, cols = (1, num_genes) if num_genes <= 4 else ((num_genes + 3) // 4, 4)
 
-            # Create subplots for multiple genes
             fig, axs = matplotlib.pyplot.subplots(rows, cols, figsize=(cols * 5, rows * 5))
             axs = axs.flat if num_genes > 1 else [axs]
 
-            # Plot each gene in a separate subplot
             for i, gene in enumerate(selected_genes):
                 gene_expression = self.adata[:, gene].X.toarray().flatten()
                 ax = axs[i]
@@ -359,7 +388,6 @@ class MainWindow(QMainWindow):
             for j in range(i + 1, len(axs)):
                 fig.delaxes(axs[j])
         else:
-            # Use Scanpy for other plot types (dot, violin, feature plot)
             from scanpy import plotting as pl
             if self.dot_plot_radio_button.isChecked():
                 pl.dotplot(self.adata, selected_genes, groupby=self.selected_metadata, categories_order=sorted(self.adata.obs[self.selected_metadata].unique()))
@@ -372,12 +400,12 @@ class MainWindow(QMainWindow):
         gc.collect()
 
     def get_rotation_axis(self):
-        # Get rotation axis for spatial scatter plot
+        # Get the axis for rotating spatial coordinates
         num = float(self.axis_input.text())
         return 180 / num if num > 0 else 360
 
     def rotate_coords(self, axis):
-        # Rotate coordinates for spatial scatter plot
+        # Rotate the spatial coordinates for plotting
         x_coords = self.adata.obsm['spatial'][:, 0]
         y_coords = self.adata.obsm['spatial'][:, 1]
         center_x = (x_coords.max() + x_coords.min()) / 2
@@ -388,14 +416,14 @@ class MainWindow(QMainWindow):
         return rotated_coords[:, 0] + center_x, rotated_coords[:, 1] + center_y
 
     def display_plot(self, fig):
+        # Display the generated plot in the web view
         import tempfile
-        # Display the generated plot in the central web view
         with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as temp_file:
             fig.write_html(temp_file.name)
             self.web_view.setUrl(QUrl.fromLocalFile(temp_file.name))
 
     def open_deg_analysis(self):
-        # Open the Differential Expression Gene (DEG) Analysis dialog
+        # Open dialog for Differential Expression Gene (DEG) analysis
         if self.adata is None:
             QMessageBox.warning(self, 'Error', 'No data loaded to perform DEG analysis.')
             return
@@ -403,11 +431,18 @@ class MainWindow(QMainWindow):
         dialog = DEGAnalysisDialog(self.adata, self.selected_metadata, self)
         dialog.show()
 
-    def open_image_merge(self):
+    def open_image_merge_dialog(self):
+        # Open dialog for merging RGB images
         dialog = ImageMergeDialog(self)
+        dialog.show()
+    
+    def comparison_other_samples_dialog(self):
+        # Open dialog for comparing DEG across samples
+        dialog = OtherSamplesDialog(self.adata, self.selected_metadata, self)
         dialog.show()
 
 class DEGAnalysisDialog(QDialog):
+    # Dialog for Differential Expression Gene (DEG) analysis
     def __init__(self, adata, selected_metadata, parent=None):
         super().__init__(parent)
         self.adata = adata
@@ -415,9 +450,9 @@ class DEGAnalysisDialog(QDialog):
         self.initUI()
 
     def initUI(self):
-        # Initialize the UI for DEG Analysis
+        # Initialize UI for DEG analysis dialog
         self.setWindowTitle('DEG Analysis')
-        self.setGeometry(200, 200, 600, 400)
+        self.setGeometry(50, 50, 600, 600)
 
         layout = QVBoxLayout()
         clusters_layout = QGridLayout()
@@ -425,7 +460,6 @@ class DEGAnalysisDialog(QDialog):
         self.clusters_list_widget = QListWidget()
         self.other_clusters_list_widget = QListWidget()
 
-        # Create group boxes for clusters and other clusters selection
         self.create_group_box('Clusters', clusters_layout, 0, 0, self.populate_clusters_list, self.clusters_list_widget)
         self.create_group_box('Other Clusters', clusters_layout, 0, 1, self.populate_other_clusters_list, self.other_clusters_list_widget)
 
@@ -433,10 +467,14 @@ class DEGAnalysisDialog(QDialog):
         layout.addWidget(self.create_button('Clear', self.clear_selection))
         layout.addWidget(self.create_button('Start', self.run_deg_analysis))
         layout.addWidget(self.create_button('Save', self.save_deg_result))
+
+        self.clusters_list_widget.itemChanged.connect(self.sync_lists)
+        self.other_clusters_list_widget.itemChanged.connect(self.sync_lists)
+
         self.setLayout(layout)
 
     def create_group_box(self, title, layout, row, col, populate_func, list_widget):
-        # Create group box and populate it with clusters or other clusters
+        # Create a group box and populate it
         group_box = QGroupBox(title)
         group_layout = QVBoxLayout(group_box)
         populate_func(list_widget)
@@ -444,7 +482,7 @@ class DEGAnalysisDialog(QDialog):
         layout.addWidget(group_box, row, col)
 
     def create_button(self, text, callback):
-        # Helper function to create buttons
+        # Create a button and connect it to the callback
         button = QPushButton(text)
         button.clicked.connect(callback)
         return button
@@ -454,7 +492,7 @@ class DEGAnalysisDialog(QDialog):
         self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
 
     def populate_other_clusters_list(self, list_widget):
-        # Populate the other clusters list with unique cluster values
+        # Populate the other clusters list
         self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
 
     def populate_list(self, list_widget, items):
@@ -465,20 +503,38 @@ class DEGAnalysisDialog(QDialog):
             list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
             list_item.setCheckState(Qt.Unchecked)
             list_widget.addItem(list_item)
+    
+    def sync_lists(self, item):
+        # Synchronize the selections in clusters and other clusters lists
+        self.clusters_list_widget.blockSignals(True)
+        self.other_clusters_list_widget.blockSignals(True)
+
+        if item.listWidget() == self.clusters_list_widget:
+            other_list = self.other_clusters_list_widget
+        else:
+            other_list = self.clusters_list_widget
+
+        for i in range(other_list.count()):
+            other_item = other_list.item(i)
+            if other_item.text() == item.text():
+                other_item.setFlags(other_item.flags() & ~Qt.ItemIsEnabled if item.checkState() == Qt.Checked else other_item.flags() | Qt.ItemIsEnabled)
+
+        self.clusters_list_widget.blockSignals(False)
+        self.other_clusters_list_widget.blockSignals(False)
 
     def clear_selection(self):
-        # Clear the selection in both clusters and other clusters lists
+        # Clear selection in both clusters lists
         self.clear_list(self.clusters_list_widget)
         self.clear_list(self.other_clusters_list_widget)
 
     def clear_list(self, list_widget):
-        # Clear the selection in a specific list widget
+        # Clear all items in the list
         for i in range(list_widget.count()):
             item = list_widget.item(i)
             item.setCheckState(Qt.Unchecked)
 
     def run_deg_analysis(self):     
-        # Run the Differential Expression Gene (DEG) analysis
+        # Perform DEG analysis
         selected_clusters = self.get_selected_items(self.clusters_list_widget)
         selected_other_clusters = self.get_selected_items(self.other_clusters_list_widget)
 
@@ -490,7 +546,7 @@ class DEGAnalysisDialog(QDialog):
         QMessageBox.information(self, "Success", "DEG Analysis completed successfully.")
 
     def run_deg_analysis_logic(self, selected_clusters, selected_other_clusters):
-        # Execute the actual DEG analysis logic using Scanpy
+        # Core logic for DEG analysis using Scanpy
         from scanpy import tools as tl
         from scanpy import plotting as pl
 
@@ -506,11 +562,11 @@ class DEGAnalysisDialog(QDialog):
         pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
 
     def get_selected_items(self, list_widget):
-        # Get selected items from the list widget
+        # Get selected items from the list
         return [item.text() for item in list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
 
     def save_deg_result(self):
-        # Save the DEG analysis result to a CSV file
+        # Save DEG analysis results to CSV
         from pandas import DataFrame
         filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)")
         if 'rank_genes_groups' in self.adata.uns:
@@ -524,18 +580,22 @@ class DEGAnalysisDialog(QDialog):
                 if not filePath.endswith('.csv'):
                     filePath += '.csv'
                 result_df.to_csv(filePath, index=False)
-                self.statusBar().showMessage(f"Data saved: {filePath}")
+                QMessageBox.information(self, "Success", f"Data saved: {filePath}")
+            self.raise_()
+            self.activateWindow()
         else:
             QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
 
 class ImageMergeDialog(QDialog):
+    # Dialog for merging RGB images
     def __init__(self, parent=None):
         super().__init__(parent)
         self.initUI()
 
     def initUI(self):
+        # Initialize UI for image merge dialog
         self.setWindowTitle('RGB Image')
-        self.setGeometry(100, 100, 600, 300)
+        self.setGeometry(50, 50, 600, 200)
 
         sub_layout = QVBoxLayout()
 
@@ -563,6 +623,7 @@ class ImageMergeDialog(QDialog):
         self.setLayout(sub_layout)
 
     def create_group_box(self, title):
+        # Create a group box for selecting image channels
         group_box = QGroupBox(title)
 
         h_layout = QHBoxLayout()
@@ -583,6 +644,7 @@ class ImageMergeDialog(QDialog):
         return group_box
     
     def show_file_dialog(self, text_browser):
+        # Show file dialog to select image files
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getOpenFileName(self, "Select PNG File", "", "PNG Files (*.png)", options=options)
 
@@ -590,15 +652,18 @@ class ImageMergeDialog(QDialog):
             text_browser.setText(file_path)
 
     def toggle_blue(self, checked):
+        # Toggle the blue channel selection
         if not checked:
             self.blue_group.text_browser.clear()
 
     def clear_file_paths(self):
+        # Clear file paths from the text browsers
         self.red_group.text_browser.clear()
         self.green_group.text_browser.clear()
         self.blue_group.text_browser.clear()
 
     def process_images(self):
+        # Process and merge selected images
         red_file = self.red_group.text_browser.toPlainText()
         green_file = self.green_group.text_browser.toPlainText()
         blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
@@ -613,12 +678,14 @@ class ImageMergeDialog(QDialog):
             self.merge_images([red_file, green_file])
 
     def process_images_common(self, image_path):
+        # Convert image to grayscale and invert
         image = Image.open(image_path)
         bw_image = image.convert('L')
         inverted_image = ImageOps.invert(bw_image)
         return inverted_image.convert('RGB')
     
     def channel_image(self, inverted_image, color):
+        # Extract the selected color channel from the image
         if color == 'red':
             red_channel = inverted_image.split()[0]
             green_channel = Image.new('L', inverted_image.size, 0)
@@ -640,6 +707,7 @@ class ImageMergeDialog(QDialog):
         high_res_image.show()
 
     def merge_images(self, image_paths):
+        # Merge red, green, and optionally blue images into an RGB image
         red_image = self.process_images_common(image_paths[0])
         green_image = self.process_images_common(image_paths[1])
 
@@ -657,9 +725,228 @@ class ImageMergeDialog(QDialog):
 
         new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
         high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
-        high_res_image.show()   
+        high_res_image.show()
 
+class OtherSamplesDialog(QDialog):
+    # Dialog for comparing DEG across multiple samples
+    def __init__(self, adata, selected_metadata, parent=None):
+        super().__init__(parent)
+        self.adata = adata
+        self.selected_metadata = selected_metadata
+        self.sample_files = [None]
+        self.sample_data = {0: adata}
+        self.initUI()
 
+    def initUI(self):
+        # Initialize UI for comparing samples dialog
+        self.setWindowTitle('DEG Other Samples')
+        self.setGeometry(50, 50, 1000, 800)
+
+        self.main_layout = QVBoxLayout(self)
+
+        self.label = QLabel("Select the number of Samples:")
+        self.combo_box = QComboBox(self)
+        self.combo_box.addItems([str(i) for i in range(2, 7)])
+        self.select_button = QPushButton("Select", self)
+        self.select_button.clicked.connect(self.create_sample_inputs)
+
+        combo_layout = QHBoxLayout()
+        combo_layout.addWidget(self.label)
+        combo_layout.addWidget(self.combo_box)
+        combo_layout.addWidget(self.select_button)
+
+        self.main_layout.addLayout(combo_layout)
+
+        self.sample1_label = QLabel(f"Sample1: {self.parent().current_file_path}")
+        self.main_layout.addWidget(self.sample1_label)
+
+        self.sample_input_layout = QVBoxLayout()
+        self.main_layout.addLayout(self.sample_input_layout)
+
+        self.show_clusters_button = QPushButton("Show the Clusters list of Samples", self)
+        self.show_clusters_button.clicked.connect(self.show_clusters_for_all_samples)
+        self.main_layout.addWidget(self.show_clusters_button)
+
+        self.sample_groupbox_layout = QHBoxLayout()
+        self.sample1_groupbox = self.create_sample_groupbox(self.adata)
+        self.sample_groupbox_layout.addWidget(self.sample1_groupbox)
+        self.main_layout.addLayout(self.sample_groupbox_layout)
+
+        self.clear_button = QPushButton("Clear", self)
+        self.clear_button.clicked.connect(self.clear_all_selection)
+        self.main_layout.addWidget(self.clear_button)
+
+        self.start_button = QPushButton("Start", self)
+        self.start_button.clicked.connect(self.compare_gene_expression)
+        self.main_layout.addWidget(self.start_button)
+
+        self.save_button = QPushButton("Save", self)
+        self.save_button.clicked.connect(self.save_file)
+        self.main_layout.addWidget(self.save_button)
+
+    def create_sample_inputs(self):
+        # Create input fields for additional samples
+        num_samples = int(self.combo_box.currentText())
+
+        for i in reversed(range(self.sample_input_layout.count())):
+            item = self.sample_input_layout.itemAt(i)
+            if item is not None and item.layout() is not None:
+                for j in reversed(range(item.layout().count())):
+                    sub_item = item.layout().itemAt(j)
+                    if sub_item is not None and sub_item.widget() is not None:
+                        sub_item.widget().deleteLater()
+                item.layout().deleteLater()
+
+        for i in reversed(range(self.sample_groupbox_layout.count())):
+            if i == 0:
+                continue
+            item = self.sample_groupbox_layout.itemAt(i)
+            if item is not None and item.widget() is not None:
+                item.widget().deleteLater()
+
+        self.sample_files = [None] * num_samples
+
+        for sample_idx in range(2, num_samples + 1):
+            file_label = QLabel(f"Sample{sample_idx}:")
+            file_browser = QTextBrowser(self)
+            file_browser.setFixedHeight(20)
+            file_button = QPushButton("File", self)
+            file_button.clicked.connect(lambda _, idx=sample_idx-1, browser=file_browser: self.select_file(idx, browser))
+
+            file_layout = QHBoxLayout()
+            file_layout.addWidget(file_label)
+            file_layout.addWidget(file_browser)
+            file_layout.addWidget(file_button)
+
+            self.sample_input_layout.addLayout(file_layout)
+
+            groupbox = QGroupBox(f"Sample{sample_idx} Clusters")
+            layout = QVBoxLayout(groupbox)
+            list_widget = QListWidget()
+            layout.addWidget(list_widget)
+            self.sample_groupbox_layout.addWidget(groupbox)
+
+    def select_file(self, idx, browser):
+        # Select a file for each additional sample
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select HDF5 File", "", "HDF5 Files (*.h5ad *.hdf5)")
+        if file_path:
+            browser.setText(file_path)
+            self.sample_files[idx] = file_path
+
+    def show_clusters_for_all_samples(self):
+        # Load and display clusters for all selected samples
+        from scanpy import read_h5ad
+        for idx, file_path in enumerate(self.sample_files):
+            if idx == 0:
+                adata = self.adata
+            else:
+                try:
+                    adata = read_h5ad(file_path)
+                    self.sample_data[idx] = adata
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
+                    continue
+
+            groupbox_layout = self.sample_groupbox_layout.itemAt(idx).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()
+            self.update_sample_groupbox(list_widget, adata)
+
+    def create_sample_groupbox(self, adata):
+        # Create a group box to display clusters for a sample
+        group_box = QGroupBox("Sample1 Clusters")
+        layout = QVBoxLayout(group_box)
+
+        cluster_list_widget = QListWidget()
+        clusters = sorted(adata.obs[self.selected_metadata].unique())
+        for cluster in clusters:
+            item = QListWidgetItem(cluster)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            cluster_list_widget.addItem(item)
+
+        layout.addWidget(cluster_list_widget)
+        return group_box
+
+    def update_sample_groupbox(self, list_widget, adata):
+        # Update the clusters list in the group box for each sample
+        list_widget.clear()
+        clusters = sorted(adata.obs[self.selected_metadata].unique())
+        for cluster in clusters:
+            item = QListWidgetItem(cluster)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(item)
+
+    def clear_all_selection(self):
+        # Clear all selections in cluster lists
+        for i in range(self.sample_groupbox_layout.count()):
+            groupbox_layout = self.sample_groupbox_layout.itemAt(i).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()
+            for j in range(list_widget.count()):
+                list_widget.item(j).setCheckState(Qt.Unchecked)
+
+    def compare_gene_expression(self):
+        # Compare gene expression between selected samples
+        import anndata
+        from scanpy import tools as tl
+        from scanpy import plotting as pl
+        combined_adata_list = []
+        sample_names = []
+
+        for idx, adata in self.sample_data.items():
+            groupbox_layout = self.sample_groupbox_layout.itemAt(idx).widget().layout()
+            list_widget = groupbox_layout.itemAt(0).widget()
+
+            selected_clusters = []
+            for j in range(list_widget.count()):
+                item = list_widget.item(j)
+                if item.checkState() == Qt.Checked:
+                    selected_clusters.append(item.text())
+
+            if not selected_clusters:
+                continue
+
+            adata_sub = adata[adata.obs[self.selected_metadata].isin(selected_clusters)].copy()
+
+            adata_sub.obs_names = [f"sample{idx+1}_{i}" for i in adata_sub.obs_names]
+            combined_adata_list.append(adata_sub)
+            sample_names.append(f"sample{idx+1}")
+
+        if not combined_adata_list:
+            QMessageBox.warning(self, "Warning", "No clusters selected for comparison.")
+            return
+
+        self.combined_adata = anndata.concat(combined_adata_list, label="sample", keys=sample_names, join="outer")
+
+        tl.rank_genes_groups(self.combined_adata, groupby='sample', method='wilcoxon')
+        pl.rank_genes_groups(self.combined_adata, n_genes=25, sharey=False)
+    
+    def save_file(self):
+        # Save the DEG comparison results to CSV
+        from pandas import DataFrame
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save CSV File", "", "CSV Files (*.csv);;All Files (*)")
+        
+        if not filePath:
+            return
+
+        if 'rank_genes_groups' in self.combined_adata.uns:
+            result = self.combined_adata.uns['rank_genes_groups']
+            groups = result['names'].dtype.names
+            result_df = DataFrame(
+                {group + '_' + key: result[key][group]
+                for group in groups for key in ['names', 'scores', 'logfoldchanges', 'pvals', 'pvals_adj']}
+            )
+            if not filePath.endswith('.csv'):
+                filePath += '.csv'
+            result_df.to_csv(filePath, index=False)
+            QMessageBox.information(self, "Success", f"Data saved: {filePath}")
+
+            self.raise_()
+            self.activateWindow()
+        else:
+            QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
+
+        
 if __name__ == '__main__':
     from multiprocessing import freeze_support
     freeze_support()

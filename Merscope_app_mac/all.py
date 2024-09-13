@@ -595,7 +595,7 @@ class ImageMergeDialog(QDialog):
     def initUI(self):
         # Initialize UI for image merge dialog
         self.setWindowTitle('RGB Image')
-        self.setGeometry(50, 50, 600, 600)
+        self.setGeometry(50, 50, 600, 200)
 
         sub_layout = QVBoxLayout()
 
