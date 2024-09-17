@@ -720,8 +720,10 @@ class ImageMergeDialog(QDialog):
 
     def process_images_common(self, image_path):
         # Convert image to grayscale and invert
+        fixed_size = (500,500)
         image = Image.open(image_path)
-        bw_image = image.convert('L')
+        img_resized = image.resize(fixed_size, Image.Resampling.LANCZOS)
+        bw_image = img_resized.convert('L')
         inverted_image = ImageOps.invert(bw_image)
         return inverted_image.convert('RGB')
 
