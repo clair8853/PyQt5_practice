@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QAction, QFileDialog, QH
                              QMessageBox, QWidget, QVBoxLayout, QGridLayout, QGroupBox, 
                              QRadioButton, QLabel, QLineEdit, QPushButton, QProgressBar,
                              QListWidget, QListWidgetItem, QSplitter, QDialog, QFontDialog,
-                             QTextBrowser, QComboBox, QStatusBar)
+                             QTextBrowser, QComboBox)
 from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 from PIL import Image, ImageOps
 from numpy import array, cos, sin, dot, vstack, pi
@@ -314,12 +314,15 @@ class MainWindow(QMainWindow):
         # Plot spatial scatter plot using Plotly
         import gc
         import plotly.graph_objects as go
+        from scanpy.plotting._utils import _set_default_colors_for_categorical_obs
         if self.adata is None:
             return
         
         axis = self.get_rotation_axis()
 
         try:
+            if self.adata.obs[self.selected_metadata].dtype.name == 'category':
+                _set_default_colors_for_categorical_obs(self.adata, self.selected_metadata)
             color_categories = self.adata.obs[self.selected_metadata].astype('category').cat.categories
             color_uns = self.selected_metadata + "_colors"
             color_map = {category: color for category, color in zip(color_categories, self.adata.uns[color_uns])}
