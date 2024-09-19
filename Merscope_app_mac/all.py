@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.current_font = self.font()
         self.adata = None  # Loaded data
         self.progress_bar = None  # Progress bar for loading
         self.selected_metadata = 'cell_type_2'
@@ -75,16 +76,22 @@ class MainWindow(QMainWindow):
         self.deg_action.setEnabled(False)
         tool_menu.addAction(self.deg_action)
 
-        self.image_action = QAction('RGB Image', self)
-        self.image_action.setShortcut('Ctrl+I')
-        self.image_action.triggered.connect(self.open_image_merge_dialog)
-        tool_menu.addAction(self.image_action)
-
         self.comparison_action = QAction('DEG other Samples', self)
         self.comparison_action.setShortcut('Ctrl+P')
         self.comparison_action.triggered.connect(self.comparison_other_samples_dialog)
         self.comparison_action.setEnabled(False)
         tool_menu.addAction(self.comparison_action)
+
+        self.subset_action = QAction('Subset Data', self)
+        self.subset_action.setShortcut('Ctrl+D')
+        self.subset_action.triggered.connect(self.subset_data_dialog)
+        self.subset_action.setEnabled(False)
+        tool_menu.addAction(self.subset_action)
+
+        self.image_action = QAction('RGB Image', self)
+        self.image_action.setShortcut('Ctrl+I')
+        self.image_action.triggered.connect(self.open_image_merge_dialog)
+        tool_menu.addAction(self.image_action)
 
         font_menu = menubar.addMenu('&Font')
 
@@ -187,11 +194,15 @@ class MainWindow(QMainWindow):
     
     def change_font_for_layout(self):
         # Open dialog to change font for the layout
-        font, ok = QFontDialog.getFont()
+        font, ok = QFontDialog.getFont(self.current_font)
         if ok:
+            self.current_font = font
             self.setFont(font)
             self.update_layout_font(self.central_widget, font)
             self.metadata_selector.setFont(font)
+
+            # Apply the font to any dialogs that are opened
+            self.dialog_font = font  # Save the current font for future dialogs
     
     def update_layout_font(self, widget, font):
         # Apply the selected font to all layout widgets
@@ -246,6 +257,7 @@ class MainWindow(QMainWindow):
         self.plot_spatial_scatter()
         self.deg_action.setEnabled(True)
         self.comparison_action.setEnabled(True)
+        self.subset_action.setEnabled(True)
         self.progress_bar.setValue(100)
         self.statusbar.showMessage("Data loaded successfully.")
         self.setup_metadata_selector()
@@ -427,22 +439,28 @@ class MainWindow(QMainWindow):
 
     def open_deg_analysis(self):
         # Open dialog for Differential Expression Gene (DEG) analysis
-        if self.adata is None:
-            QMessageBox.warning(self, 'Error', 'No data loaded to perform DEG analysis.')
-            return
-
         dialog = DEGAnalysisDialog(self.adata, self.selected_metadata, self)
+        dialog.setFont(self.current_font)
+        dialog.show()
+
+    def comparison_other_samples_dialog(self):
+        # Open dialog for comparing DEG across samples
+        dialog = OtherSamplesDialog(self.adata, self.selected_metadata, self)
+        dialog.setFont(self.current_font)
+        dialog.show()
+
+    def subset_data_dialog(self):
+        # Open dialog for subset data
+        dialog = SubsetDataDialog(self.adata, self.selected_metadata, self)
+        dialog.setFont(self.current_font)
         dialog.show()
 
     def open_image_merge_dialog(self):
         # Open dialog for merging RGB images
         dialog = ImageMergeDialog(self)
+        dialog.setFont(self.current_font)
         dialog.show()
-    
-    def comparison_other_samples_dialog(self):
-        # Open dialog for comparing DEG across samples
-        dialog = OtherSamplesDialog(self.adata, self.selected_metadata, self)
-        dialog.show()
+
 
 class DEGAnalysisDialog(QDialog):
     # Dialog for Differential Expression Gene (DEG) analysis
@@ -588,186 +606,6 @@ class DEGAnalysisDialog(QDialog):
             self.activateWindow()
         else:
             QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
-
-class ImageMergeDialog(QDialog):
-    # Dialog for merging RGB images
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.save_directory = None  # Initialize save directory
-        self.initUI()
-
-    def initUI(self):
-        # Initialize UI for image merge dialog
-        self.setWindowTitle('RGB Image')
-        self.setGeometry(50, 50, 700, 300)
-
-        sub_layout = QVBoxLayout()
-
-        self.red_group = self.create_group_box("Red")
-        self.green_group = self.create_group_box("Green")
-        self.blue_group = self.create_group_box("Blue")
-        self.blue_group.setCheckable(True)
-        self.blue_group.setChecked(False)
-
-        self.blue_group.toggled.connect(self.toggle_blue)
-
-        sub_layout.addWidget(self.red_group)
-        sub_layout.addWidget(self.green_group)
-        sub_layout.addWidget(self.blue_group)
-
-        # Save folder group box
-        self.save_group_box = self.create_save_group_box("Save Folder")
-
-        # Buttons
-        clear_button = QPushButton("Clear", self)
-        clear_button.clicked.connect(self.clear_file_paths)
-
-        start_button = QPushButton("Start", self)
-        start_button.clicked.connect(self.process_images)
-
-        sub_layout.addWidget(self.save_group_box)  # Add the save folder group box
-        sub_layout.addWidget(clear_button)
-        sub_layout.addWidget(start_button)
-
-        self.setLayout(sub_layout)
-
-    def create_group_box(self, title):
-        # Create a group box for selecting image channels
-        group_box = QGroupBox(title)
-
-        h_layout = QHBoxLayout()
-
-        text_browser = QTextBrowser(self)
-        text_browser.setPlaceholderText(f"Please select {title} file path")
-        text_browser.setFixedHeight(30)
-
-        button = QPushButton("...", self)
-        button.clicked.connect(lambda: self.show_file_dialog(text_browser))
-
-        h_layout.addWidget(text_browser)
-        h_layout.addWidget(button)
-
-        group_box.setLayout(h_layout)
-
-        group_box.text_browser = text_browser
-        return group_box
-
-    def create_save_group_box(self, title):
-        # Create a group box for selecting save folder and displaying path
-        group_box = QGroupBox(title)
-
-        h_layout = QHBoxLayout()
-
-        # Text browser to display selected save folder path
-        self.save_folder_browser = QTextBrowser(self)
-        self.save_folder_browser.setPlaceholderText("Selected save folder will be displayed here")
-        self.save_folder_browser.setFixedHeight(30)
-
-        # Button to open file dialog to select folder
-        select_folder_button = QPushButton("Select Save Folder", self)
-        select_folder_button.clicked.connect(self.select_save_directory)
-
-        h_layout.addWidget(self.save_folder_browser)
-        h_layout.addWidget(select_folder_button)
-
-        group_box.setLayout(h_layout)
-        return group_box
-
-    def show_file_dialog(self, text_browser):
-        # Show file dialog to select image files
-        options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select PNG File", "", "PNG Files (*.png)", options=options)
-
-        if file_path:
-            text_browser.setText(file_path)
-
-    def select_save_directory(self):
-        # Open a dialog to select the directory where images will be saved
-        self.save_directory = QFileDialog.getExistingDirectory(self, "Select Save Folder")
-        if self.save_directory:
-            # Display the selected folder path in the text browser
-            self.save_folder_browser.setText(self.save_directory)
-
-    def toggle_blue(self, checked):
-        # Toggle the blue channel selection
-        if not checked:
-            self.blue_group.text_browser.clear()
-
-    def clear_file_paths(self):
-        # Clear file paths from the text browsers
-        self.red_group.text_browser.clear()
-        self.green_group.text_browser.clear()
-        self.blue_group.text_browser.clear()
-
-    def process_images(self):
-        # Process and merge selected images
-        if not self.save_directory:
-            QMessageBox.warning(self, "Warning", "Please select a folder to save the images.")
-            return
-
-        red_file = self.red_group.text_browser.toPlainText()
-        green_file = self.green_group.text_browser.toPlainText()
-        blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
-
-        if not red_file or not green_file:
-            QMessageBox.warning(self, "Warning", "Please select Red and Green files.")
-            return
-
-        if blue_file:
-            self.merge_images([red_file, green_file, blue_file])
-        else:
-            self.merge_images([red_file, green_file])
-
-    def process_images_common(self, image_path):
-        # Convert image to grayscale and invert
-        image = Image.open(image_path)
-        bw_image = image.convert('L')
-        inverted_image = ImageOps.invert(bw_image)
-        return inverted_image.convert('RGB')
-
-    def channel_image(self, inverted_image, color):
-        # Extract the selected color channel from the image
-        red_channel = green_channel = blue_channel = Image.new('L', inverted_image.size, 0)
-
-        if color == 'red':
-            red_channel = inverted_image.split()[0]
-        elif color == 'green':
-            green_channel = inverted_image.split()[1]
-        elif color == 'blue':
-            blue_channel = inverted_image.split()[2]
-        
-        channel_image = Image.merge('RGB', (red_channel, green_channel, blue_channel))
-
-        new_size = (int(channel_image.width * 10), int(channel_image.height * 10))
-        high_res_image = channel_image.resize(new_size, Image.Resampling.LANCZOS)
-
-        if self.save_directory:
-            high_res_image.save(f'{self.save_directory}/{color}_image.jpg', quality=100)
-
-    def merge_images(self, image_paths):
-        # Merge red, green, and optionally blue images into an RGB image
-        red_image = self.process_images_common(image_paths[0])
-        green_image = self.process_images_common(image_paths[1])
-
-        if len(image_paths) == 3:
-            blue_image = self.process_images_common(image_paths[2])
-            channels = [red_image.split()[0], green_image.split()[1], blue_image.split()[2]]
-            self.channel_image(blue_image, 'blue')
-        else:
-            channels = [red_image.split()[0], green_image.split()[1], Image.new('L', red_image.size, 0)]
-
-        merged_image = Image.merge('RGB', channels)
-
-        self.channel_image(red_image, 'red')
-        self.channel_image(green_image, 'green')
-
-        new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
-        high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
-        
-        if self.save_directory:
-            high_res_image.save(f'{self.save_directory}/merged_image.png', quality=100)
-
-        QMessageBox.information(self, "Success", f"Images saved in {self.save_directory}")
 
 
 class OtherSamplesDialog(QDialog):
@@ -988,6 +826,277 @@ class OtherSamplesDialog(QDialog):
             self.activateWindow()
         else:
             QMessageBox.critical(self, "Error", "No results to save. Please run the analysis first.")
+
+
+class SubsetDataDialog(QDialog):
+    # Dialog for Subset Data
+    def __init__(self, adata, selected_metadata, parent=None):
+        super().__init__(parent)
+        self.adata = adata
+        self.selected_metadata = selected_metadata
+        self.initUI()
+
+    def initUI(self):
+        # Initialize UI for DEG analysis dialog
+        self.setWindowTitle('DEG Analysis')
+        self.setGeometry(50, 50, 300, 600)
+
+        layout = QVBoxLayout()
+        clusters_layout = QGridLayout()
+
+        self.subset_clusters_list_widget = QListWidget()
+        
+        self.create_group_box('Clusters', clusters_layout, 0, 0, self.populate_clusters_list, self.subset_clusters_list_widget)
+
+        layout.addLayout(clusters_layout)
+        layout.addWidget(self.create_button('Clear', self.clear_selection))
+        layout.addWidget(self.create_button('Start', self.run_subset_data))
+
+        self.setLayout(layout)
+
+    def create_group_box(self, title, layout, row, col, populate_func, list_widget):
+        # Create a group box and populate it
+        group_box = QGroupBox(title)
+        group_layout = QVBoxLayout(group_box)
+        populate_func(list_widget)
+        group_layout.addWidget(list_widget)
+        layout.addWidget(group_box, row, col)
+
+    def create_button(self, text, callback):
+        # Create a button and connect it to the callback
+        button = QPushButton(text)
+        button.clicked.connect(callback)
+        return button
+
+    def populate_clusters_list(self, list_widget):
+        # Populate the clusters list with unique cluster values
+        self.populate_list(list_widget, self.adata.obs[self.selected_metadata].unique())
+
+    def populate_list(self, list_widget, items):
+        # Helper function to populate a list widget with items
+        list_widget.clear()
+        for item in sorted(items):
+            list_item = QListWidgetItem(item)
+            list_item.setFlags(list_item.flags() | Qt.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.Unchecked)
+            list_widget.addItem(list_item)
+    
+    def clear_selection(self):
+        # Clear selection in both clusters lists
+        self.clear_list(self.subset_clusters_list_widget)
+
+    def clear_list(self, list_widget):
+        # Clear all items in the list
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            item.setCheckState(Qt.Unchecked)
+
+    def run_subset_data(self):     
+        # Perform DEG analysis
+        selected_clusters = self.get_selected_items(self.subset_clusters_list_widget)
+
+        if not selected_clusters:
+            QMessageBox.warning(self, "Warning", "Please select at least one cluster")
+            return
+
+        self.run_subset_data_logic(selected_clusters)
+
+    def run_subset_data_logic(self, selected_clusters):
+        # Core logic for Subset data
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save Anndata", "", "Anndata (*.h5ad);;All Files (*)")
+        subset_adata = self.adata[self.adata.obs[self.selected_metadata].isin(selected_clusters)].copy()
+        if filePath:
+                if not filePath.endswith('.h5ad'):
+                    filePath += '.h5ad'
+                subset_adata.write(filePath)
+                QMessageBox.information(self, "Success", f"Data saved: {filePath}")                 
+
+    def get_selected_items(self, list_widget):
+        # Get selected items from the list
+        return [item.text() for item in list_widget.findItems("*", Qt.MatchWildcard) if item.checkState() == Qt.Checked]
+
+
+class ImageMergeDialog(QDialog):
+    # Dialog for merging RGB images
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.save_directory = None  # Initialize save directory
+        self.initUI()
+
+    def initUI(self):
+        # Initialize UI for image merge dialog
+        self.setWindowTitle('RGB Image')
+        self.setGeometry(50, 50, 700, 300)
+
+        sub_layout = QVBoxLayout()
+
+        self.red_group = self.create_group_box("Red")
+        self.green_group = self.create_group_box("Green")
+        self.blue_group = self.create_group_box("Blue")
+        self.blue_group.setCheckable(True)
+        self.blue_group.setChecked(False)
+
+        self.blue_group.toggled.connect(self.toggle_blue)
+
+        sub_layout.addWidget(self.red_group)
+        sub_layout.addWidget(self.green_group)
+        sub_layout.addWidget(self.blue_group)
+
+        # Save folder group box
+        self.save_group_box = self.create_save_group_box("Save Folder")
+
+        # Buttons
+        clear_button = QPushButton("Clear", self)
+        clear_button.clicked.connect(self.clear_file_paths)
+
+        start_button = QPushButton("Start", self)
+        start_button.clicked.connect(self.process_images)
+
+        sub_layout.addWidget(self.save_group_box)  # Add the save folder group box
+        sub_layout.addWidget(clear_button)
+        sub_layout.addWidget(start_button)
+
+        self.setLayout(sub_layout)
+
+    def create_group_box(self, title):
+        # Create a group box for selecting image channels
+        group_box = QGroupBox(title)
+
+        h_layout = QHBoxLayout()
+
+        text_browser = QTextBrowser(self)
+        text_browser.setPlaceholderText(f"Please select {title} file path")
+        text_browser.setFixedHeight(30)
+
+        button = QPushButton("...", self)
+        button.clicked.connect(lambda: self.show_file_dialog(text_browser))
+
+        h_layout.addWidget(text_browser)
+        h_layout.addWidget(button)
+
+        group_box.setLayout(h_layout)
+
+        group_box.text_browser = text_browser
+        return group_box
+
+    def create_save_group_box(self, title):
+        # Create a group box for selecting save folder and displaying path
+        group_box = QGroupBox(title)
+
+        h_layout = QHBoxLayout()
+
+        # Text browser to display selected save folder path
+        self.save_folder_browser = QTextBrowser(self)
+        self.save_folder_browser.setPlaceholderText("Selected save folder will be displayed here")
+        self.save_folder_browser.setFixedHeight(30)
+
+        # Button to open file dialog to select folder
+        select_folder_button = QPushButton("Select Save Folder", self)
+        select_folder_button.clicked.connect(self.select_save_directory)
+
+        h_layout.addWidget(self.save_folder_browser)
+        h_layout.addWidget(select_folder_button)
+
+        group_box.setLayout(h_layout)
+        return group_box
+
+    def show_file_dialog(self, text_browser):
+        # Show file dialog to select image files
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select PNG File", "", "PNG Files (*.png)", options=options)
+
+        if file_path:
+            text_browser.setText(file_path)
+
+    def select_save_directory(self):
+        # Open a dialog to select the directory where images will be saved
+        self.save_directory = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+        if self.save_directory:
+            # Display the selected folder path in the text browser
+            self.save_folder_browser.setText(self.save_directory)
+
+    def toggle_blue(self, checked):
+        # Toggle the blue channel selection
+        if not checked:
+            self.blue_group.text_browser.clear()
+
+    def clear_file_paths(self):
+        # Clear file paths from the text browsers
+        self.red_group.text_browser.clear()
+        self.green_group.text_browser.clear()
+        self.blue_group.text_browser.clear()
+
+    def process_images(self):
+        # Process and merge selected images
+        if not self.save_directory:
+            QMessageBox.warning(self, "Warning", "Please select a folder to save the images.")
+            return
+
+        red_file = self.red_group.text_browser.toPlainText()
+        green_file = self.green_group.text_browser.toPlainText()
+        blue_file = self.blue_group.text_browser.toPlainText() if self.blue_group.isChecked() else None
+
+        if not red_file or not green_file:
+            QMessageBox.warning(self, "Warning", "Please select Red and Green files.")
+            return
+
+        if blue_file:
+            self.merge_images([red_file, green_file, blue_file])
+        else:
+            self.merge_images([red_file, green_file])
+
+    def process_images_common(self, image_path):
+        # Convert image to grayscale and invert
+        fixed_size = (500,500)
+        image = Image.open(image_path)
+        img_resized = image.resize(fixed_size, Image.Resampling.LANCZOS)
+        bw_image = img_resized.convert('L')
+        inverted_image = ImageOps.invert(bw_image)
+        return inverted_image.convert('RGB')
+
+    def channel_image(self, inverted_image, color):
+        # Extract the selected color channel from the image
+        red_channel = green_channel = blue_channel = Image.new('L', inverted_image.size, 0)
+
+        if color == 'red':
+            red_channel = inverted_image.split()[0]
+        elif color == 'green':
+            green_channel = inverted_image.split()[1]
+        elif color == 'blue':
+            blue_channel = inverted_image.split()[2]
+        
+        channel_image = Image.merge('RGB', (red_channel, green_channel, blue_channel))
+
+        new_size = (int(channel_image.width * 10), int(channel_image.height * 10))
+        high_res_image = channel_image.resize(new_size, Image.Resampling.LANCZOS)
+
+        if self.save_directory:
+            high_res_image.save(f'{self.save_directory}/{color}_image.jpg', quality=100)
+
+    def merge_images(self, image_paths):
+        # Merge red, green, and optionally blue images into an RGB image
+        red_image = self.process_images_common(image_paths[0])
+        green_image = self.process_images_common(image_paths[1])
+
+        if len(image_paths) == 3:
+            blue_image = self.process_images_common(image_paths[2])
+            channels = [red_image.split()[0], green_image.split()[1], blue_image.split()[2]]
+            self.channel_image(blue_image, 'blue')
+        else:
+            channels = [red_image.split()[0], green_image.split()[1], Image.new('L', red_image.size, 0)]
+
+        merged_image = Image.merge('RGB', channels)
+
+        self.channel_image(red_image, 'red')
+        self.channel_image(green_image, 'green')
+
+        new_size = (int(merged_image.width * 10), int(merged_image.height * 10))
+        high_res_image = merged_image.resize(new_size, Image.Resampling.LANCZOS)
+        
+        if self.save_directory:
+            high_res_image.save(f'{self.save_directory}/merged_image.png', quality=100)
+
+        QMessageBox.information(self, "Success", f"Images saved in {self.save_directory}")
 
         
 if __name__ == '__main__':
