@@ -574,12 +574,12 @@ class DEGAnalysisDialog(QDialog):
         merged_cluster_A = '_'.join(selected_clusters)
         merged_cluster_B = '_'.join(selected_other_clusters)
 
-        self.adata.obs['cell_type_3'] = self.adata.obs[self.selected_metadata].astype(str)
-        self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_clusters)] = merged_cluster_A
-        self.adata.obs['cell_type_3'][self.adata.obs['cell_type_3'].isin(selected_other_clusters)] = merged_cluster_B                        
-        self.adata.obs['cell_type_3'] = self.adata.obs['cell_type_3'].astype('category')
+        self.adata.obs['deg_analysis_metadata'] = self.adata.obs[self.selected_metadata].astype(str)
+        self.adata.obs['deg_analysis_metadata'][self.adata.obs['deg_analysis_metadata'].isin(selected_clusters)] = merged_cluster_A
+        self.adata.obs['deg_analysis_metadata'][self.adata.obs['deg_analysis_metadata'].isin(selected_other_clusters)] = merged_cluster_B                        
+        self.adata.obs['deg_analysis_metadata'] = self.adata.obs['deg_analysis_metadata'].astype('category')
 
-        tl.rank_genes_groups(self.adata, 'cell_type_3', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
+        tl.rank_genes_groups(self.adata, 'deg_analysis_metadata', groups=[merged_cluster_A], reference=merged_cluster_B, method='wilcoxon')            
         pl.rank_genes_groups(self.adata, n_genes=25, sharey=False)
 
     def get_selected_items(self, list_widget):
