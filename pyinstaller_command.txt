@@ -9,7 +9,7 @@ pyinstaller --onefile --windowed --strip --name="Merscope Visualizer" --add-data
 
 mac:
 
-pyinstaller --onedir --windowed --name="Merscope Visualizer" \
+pyinstaller --onefile --windowed --name="Merscope Visualizer" \
 --hidden-import=scanpy\
 --hidden-import=pandas\
 --hidden-import=matplotlib.backends.backend_qt5agg\
